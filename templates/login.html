@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Login - QKD Secure Bank{% endblock %}
+
+{% block container_class %}container-narrow{% endblock %}
+
+{% block head_style %}
+<style>
+    .container-narrow { max-width: 450px; }
+    h2 { text-align: center; color: #495057; margin-bottom: 30px; font-weight: 500; }
+    form div { margin-bottom: 15px; }
+</style>
+{% endblock %}
+
+{% block content %}
+    <h2>Customer Login</h2>
+
+    <!-- Login Form -->
+    <form action="{{ url_for('login') }}{{ '?next=' + request.args.get('next', '') if request.args.get('next') else '' }}" method="post" novalidate>
+        <div>
+            <label for="customer_name">Customer Name:</label>
+            {# Using name as login identifier #}
+            <input type="text" id="customer_name" name="customer_name" required value="{{ request.form.customer_name or '' }}">
+        </div>
+         <div>
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required>
+         </div>
+        <button type="submit" class="button-primary">Login</button>
+    </form>
+
+    <!-- Navigation Links -->
+    <div class="nav-link">
+        <a href="{{ url_for('register_customer') }}">Not registered? Create Account</a> |
+        <a href="{{ url_for('index') }}">Back to Main</a>
+    </div>
+{% endblock %}

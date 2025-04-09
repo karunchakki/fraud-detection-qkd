@@ -1,70 +1,47 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register New Customer - QKD Secure Bank</title>
-    <style>
-        /* --- Consistent Styling Based on Previous "Best" --- */
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #343a40; line-height: 1.6; display: flex; flex-direction: column; min-height: 100vh; }
-        .header { background-color: #0d6efd; color: white; padding: 15px 40px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .header h1 { margin: 0; font-size: 1.8rem; font-weight: 500; }
-        .container { background-color: #ffffff; padding: 30px 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); max-width: 550px; margin: 40px auto; flex-grow: 1; }
-        h2 { text-align: center; color: #495057; margin-bottom: 30px; font-weight: 500; }
-        label { display: block; margin-bottom: 8px; font-weight: 600; color: #495057; }
-        input[type="text"] { width: 100%; box-sizing: border-box; padding: 12px 10px; margin-bottom: 25px; border: 1px solid #ced4da; border-radius: 4px; font-size: 1rem; transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
-        input[type="text"]:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25); }
-        button[type="submit"] { background-color: #198754; /* Green for create */ color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1rem; font-weight: 500; width: 100%; transition: background-color 0.2s ease; margin-top: 10px; }
-        button[type="submit"]:hover { background-color: #157347; } /* Darker green */
-        .flash-messages { list-style: none; padding: 0; margin: 0 0 25px 0; }
-        .flash-messages li { padding: 15px 20px; margin-bottom: 15px; border-radius: 5px; border: 1px solid transparent; font-weight: 500; }
-        .flash-error { background-color: #f8d7da; color: #842029; border-color: #f5c2c7; }
-        .nav-link { display: block; margin-top: 30px; text-align: center; }
-        .nav-link a { color: #0d6efd; text-decoration: none; font-weight: 500; }
-        .nav-link a:hover { text-decoration: underline; }
-        .footer { text-align: center; margin-top: 30px; padding: 15px; font-size: 0.9em; color: #6c757d; border-top: 1px solid #dee2e6; background-color: #f1f3f5; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>QKD Secure Bank Portal</h1>
-    </div>
-    <div class="container">
-        <h2>Register New Customer</h2>
-        <p style="text-align: center; color: #6c757d; margin-top: -20px; margin-bottom: 30px;">An account with a starting balance of ₹{{ "%.2f"|format(INITIAL_BALANCE | default(1000.00)) }} will be created.</p>
+{% extends "base.html" %}
 
-        <!-- Flash Messages -->
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <ul class="flash-messages">
-                {% for category, message in messages %}
-                    {% if category == 'error' %}
-                        <li class="flash-{{ category }}">{{ message }}</li>
-                    {% endif %}
-                {% endfor %}
-                </ul>
-            {% endif %}
-        {% endwith %}
+{% block title %}Register - QKD Secure Bank{% endblock %}
 
-        <!-- Registration Form -->
-        <form action="{{ url_for('register_customer') }}" method="post">
-            <div>
-                <label for="customer_name">Customer Full Name:</label>
-                <input type="text" id="customer_name" name="customer_name" placeholder="Enter full name" required minlength="2">
-            </div>
-            <button type="submit">Register & Create Account</button>
-        </form>
+{% block container_class %}container-narrow{% endblock %} {# Optional: Override container class for narrower width #}
 
-        <!-- Navigation -->
-        <div class="nav-link">
-            <a href="{{ url_for('index') }}">Back to Transfers</a>
+{% block head_style %}
+<style>
+    /* --- Use similar styling as previous 'best' templates --- */
+    .container-narrow { max-width: 550px; }
+    h2 { text-align: center; color: #495057; margin-bottom: 20px; font-weight: 500; }
+    p.info { text-align: center; color: #6c757d; margin-top: -10px; margin-bottom: 30px; font-size: 0.9rem;}
+    form div { margin-bottom: 15px; } /* Spacing between form fields */
+    button[type="submit"] { background-color: #198754; } /* Green for create */
+    button[type="submit"]:hover { background-color: #157347; } /* Darker green */
+    .nav-link a { color: #0d6efd; }
+</style>
+{% endblock %}
+
+{% block content %}
+    <h2>Register New Customer</h2>
+    {# Access INITIAL_BALANCE passed from the route via context processor #}
+    <p class="info">An account with ₹{{ "%.2f"|format(INITIAL_BALANCE | default(1000.00)) }} balance will be created automatically.</p>
+
+    <!-- Registration Form -->
+    <form action="{{ url_for('register_customer') }}" method="post" novalidate> {# Added novalidate #}
+        <div>
+            <label for="customer_name">Full Name:</label>
+            <input type="text" id="customer_name" name="customer_name" placeholder="Enter unique name for login" required minlength="2" value="{{ request.form.customer_name or '' }}"> {# Keep value on error #}
         </div>
-    </div>
-Quantum-Secure Banking Simulation © <span id="current-year"></span>
-</div> <!-- Close footer div -->
+         <div>
+            <label for="password">Password (min 6 chars):</label>
+            <input type="password" id="password" name="password" required minlength="6">
+         </div>
+         <div>
+            <label for="confirm_password">Confirm Password:</label>
+            <input type="password" id="confirm_password" name="confirm_password" required minlength="6">
+         </div>
+        <button type="submit" class="button-success">Register & Create Account</button>
+    </form>
 
-<script>
-    document.getElementById('current-year').textContent = new Date().getFullYear();
-</script>
-</body>
-</html>
+    <!-- Navigation Links -->
+    <div class="nav-link">
+        <a href="{{ url_for('login') }}">Already registered? Login</a> |
+        <a href="{{ url_for('index') }}">Back to Main Page</a> {# Changed link text #}
+    </div>
+{% endblock %}

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- The title block can be overridden by child templates -->
+    <title>{% block title %}QKD Secure Bank{% endblock %}</title>
+    <style>
+        /* --- Base Styling (Consistent across pages) --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0; padding: 0;
+            background-color: #f8f9fa;
+            color: #343a40;
+            line-height: 1.6;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .header {
+            background-color: #0d6efd;
+            color: white;
+            padding: 15px 40px;
+            display: flex; /* Use flexbox for alignment */
+            justify-content: space-between; /* Space out title and nav */
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.6rem; /* Slightly smaller main title */
+            font-weight: 500;
+        }
+        .header h1 a {
+             color: white;
+             text-decoration: none;
+        }
+        .header-nav ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center; /* Vertically align nav items */
+        }
+        .header-nav li {
+            margin-left: 15px; /* Adjust spacing */
+        }
+         /* Style for welcome message */
+        .header-nav li.welcome-user {
+             margin-right: 15px; /* Space before links */
+             font-size: 0.9rem;
+             color: #e9ecef; /* Lighter color for welcome message */
+        }
+        .header-nav a {
+            color: #ffffff;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.95rem;
+            padding: 6px 12px; /* Adjusted padding */
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+        .header-nav a:hover, .header-nav a.active {
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+         /* Logout link style */
+        .header-nav a.logout-link {
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+         .header-nav a.logout-link:hover {
+             background-color: rgba(220, 53, 69, 0.8); /* Reddish hover */
+             border-color: rgba(220, 53, 69, 0);
+         }
+
+        .container {
+            background-color: #ffffff;
+            padding: 30px 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            max-width: 950px; /* Default max width, can be overridden */
+            margin: 30px auto; /* Center container */
+            flex-grow: 1; /* Allow container to fill space */
+        }
+        .footer {
+            text-align: center;
+            margin-top: auto; /* Push footer down */
+            padding: 20px;
+            font-size: 0.9em;
+            color: #6c757d;
+            border-top: 1px solid #dee2e6;
+            background-color: #f1f3f5;
+        }
+        /* Flash Messages (Common Style) */
+        .flash-messages { list-style: none; padding: 0; margin: 0 0 25px 0; }
+        .flash-messages li { padding: 15px 20px; margin-bottom: 15px; border-radius: 5px; border: 1px solid transparent; font-weight: 500; }
+        .flash-success { background-color: #d1e7dd; color: #0f5132; border-color: #badbcc; }
+        .flash-error { background-color: #f8d7da; color: #842029; border-color: #f5c2c7; }
+        .flash-warning { background-color: #fff3cd; color: #664d03; border-color: #ffecb5; }
+        .flash-info { background-color: #cff4fc; color: #055160; border-color: #b6effb; }
+
+        /* --- General Form Styling --- */
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #495057; }
+        input[type="text"], input[type="password"], input[type="number"], select {
+            width: 100%; box-sizing: border-box; padding: 12px 10px; margin-bottom: 20px;
+            border: 1px solid #ced4da; border-radius: 4px; font-size: 1rem;
+            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            background-color: #fff;
+        }
+        input:focus, select:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25); }
+        button[type="submit"] {
+            color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer;
+            font-size: 1.1rem; font-weight: 500; width: 100%; transition: background-color 0.2s ease;
+            margin-top: 10px;
+        }
+        .button-primary { background-color: #0d6efd; } /* Blue */
+        .button-primary:hover { background-color: #0b5ed7; }
+        .button-success { background-color: #198754; } /* Green */
+        .button-success:hover { background-color: #157347; }
+        .nav-link { display: block; margin-top: 30px; text-align: center; }
+        .nav-link a { color: #0d6efd; text-decoration: none; font-weight: 500; margin: 0 10px;}
+        .nav-link a:hover { text-decoration: underline; }
+
+        /* Block for specific page styles */
+        {% block head_style %}{% endblock %}
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1><a href="{{ url_for('index') }}">QKD Secure Bank Portal</a></h1>
+        <nav class="header-nav">
+            <ul>
+                <!-- Use session_user injected by context processor -->
+                {% if session_user %}
+                    <li class="welcome-user">Welcome, {{ session_user.name }}!</li>
+                    <li><a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' else '' }}">Transfer</a></li>
+                    <li><a href="{{ url_for('history') }}" class="{{ 'active' if request.endpoint == 'history' else '' }}">History</a></li>
+                    <li><a href="{{ url_for('logout') }}" class="logout-link">Logout</a></li>
+                {% else %}
+                    <li><a href="{{ url_for('login') }}" class="{{ 'active' if request.endpoint == 'login' else '' }}">Login</a></li>
+                    <li><a href="{{ url_for('register_customer') }}" class="{{ 'active' if request.endpoint == 'register_customer' else '' }}">Register</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container {% block container_class %}{% endblock %}">
+         <!-- Flash Messages Area -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flash-messages">
+                {% for category, message in messages %}
+                    <li class="flash-{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Main content block overridden by child templates -->
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        Quantum-Secure Banking Simulation © <span id="current-year"></span> {# Span for JS to target #}
+    </footer>
+
+    <!-- JavaScript for dynamic year -->
+    <script>
+        const yearSpan = document.getElementById('current-year');
+        if (yearSpan) {
+            yearSpan.textContent = new Date().getFullYear();
+        }
+    </script>
+    <!-- Block for page-specific scripts -->
+    {% block scripts %}{% endblock %}
+</body>
+</html>
