@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transfer Funds - QKD Secure Bank</title>
+    <style>
+        /* --- Consistent Styling --- */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #343a40; line-height: 1.6; display: flex; flex-direction: column; min-height: 100vh; }
+        .header { background-color: #0d6efd; color: white; padding: 15px 40px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header h1 { margin: 0; font-size: 1.8rem; font-weight: 500; }
+        .container { background-color: #ffffff; padding: 30px 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); max-width: 950px; /* Wider */ margin: 40px auto; flex-grow: 1; }
+        h2 { text-align: center; color: #495057; margin-bottom: 20px; font-weight: 500; }
+        h3 { color: #0d6efd; margin-top: 30px; margin-bottom: 15px; border-bottom: 2px solid #0d6efd; padding-bottom: 5px; font-weight: 500; }
+        hr { border: 0; height: 1px; background-color: #e9ecef; margin: 35px 0; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; color: #495057; font-size: 0.95rem;}
+        select, input[type="text"] { width: 100%; padding: 12px 10px; margin-bottom: 20px; border: 1px solid #ced4da; border-radius: 4px; font-size: 1rem; box-sizing: border-box; background-color: #fff; }
+        select:focus, input:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25); }
+        button[type="submit"] { background-color: #198754; color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1rem; font-weight: 500; width: 100%; transition: background-color 0.2s ease; margin-top: 15px; }
+        button[type="submit"]:hover { background-color: #157347; }
+        /* Account Balances Table */
+        .balances-section { margin-bottom: 30px; }
+        .balances-table { width: 100%; border-collapse: collapse; margin-top: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.04);}
+        .balances-table th, .balances-table td { border: 1px solid #dee2e6; padding: 10px 12px; text-align: left; font-size: 0.95rem;}
+        .balances-table th { background-color: #e9ecef; font-weight: 600;}
+        .balances-table td.acc-name { font-weight: 500; }
+        .balances-table td.acc-balance { text-align: right; font-weight: 500; font-family: monospace; }
+        /* Form Layout */
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 25px; align-items: end;}
+        .form-grid div { margin-bottom: 0; }
+        /* Checkbox Styling */
+        .eve-checkbox-container { margin: 20px 0 25px 0; display: flex; align-items: center; padding: 12px 15px; background-color: #f1f3f5; border: 1px solid #ced4da; border-radius: 5px; grid-column: 1 / -1; }
+        .eve-checkbox-container input[type="checkbox"] { width: auto; margin-bottom: 0; margin-right: 12px; transform: scale(1.1); cursor: pointer; accent-color: #dc3545; /* Red accent for danger */ }
+        .eve-checkbox-container label { margin-bottom: 0; font-weight: 400; cursor: pointer; flex-grow: 1; font-size: 0.95rem;}
+        /* Flash Messages */
+        .flash-messages { list-style: none; padding: 0; margin: 0 0 25px 0; }
+        .flash-messages li { padding: 15px 20px; margin-bottom: 15px; border-radius: 5px; border: 1px solid transparent; font-weight: 500; }
+        .flash-success { background-color: #d1e7dd; color: #0f5132; border-color: #badbcc; }
+        .flash-error { background-color: #f8d7da; color: #842029; border-color: #f5c2c7; }
+        .flash-warning { background-color: #fff3cd; color: #664d03; border-color: #ffecb5; }
+        /* Result Display */
+        .result { margin-top: 30px; padding: 20px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; word-wrap: break-word; font-size: 0.9rem; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);}
+        .result strong.result-title { display: block; margin-bottom: 15px; font-weight: 600; color: #212529; font-family: inherit; font-size: 1.1rem; border-bottom: 1px solid #dee2e6; padding-bottom: 10px;}
+        .result p { margin: 10px 0; line-height: 1.7;}
+        .result .label { font-weight: 600; color: #495057; display: inline-block; min-width: 210px;} /* Wider label */
+        .result code { background-color: #e9ecef; padding: 3px 6px; border-radius: 4px; color: #0d6efd; /* Blue code */ font-family: monospace;}
+        .result .status-success { color: #198754; font-weight: bold;}
+        .result .status-fail { color: #dc3545; font-weight: bold;}
+        .result .status-warning { color: #664d03; font-weight: bold;}
+        .result .status-secured { color: #198754;} /* Green */
+        .result .status-qber-fail, .result .status-key-len-fail, .result .status-encryption-fail { color: #ffc107;} /* Warning Yellow */
+        .result .status-qber-threshold-exceeded { color: #dc3545;} /* Red */
+        .result .status-validation-fail { color: #dc3545;} /* Red */
+        .result .decryption-success { color: #198754; font-weight: bold; font-family: monospace;}
+        .result .decryption-failure { color: #dc3545; font-weight: bold; font-family: monospace;}
+        /* Navigation Links */
+        .nav-links { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;}
+        .nav-links a { color: #0d6efd; text-decoration: none; font-weight: 500; padding: 8px 15px; border: 1px solid #dee2e6; border-radius: 5px; transition: background-color 0.2s ease, color 0.2s ease; margin: 5px;}
+        .nav-links a:hover { background-color: #e9ecef; color: #0a58ca; text-decoration: none; }
+        .footer { text-align: center; margin-top: 40px; padding: 20px; font-size: 0.9em; color: #6c757d; border-top: 1px solid #dee2e6; background-color: #f1f3f5;}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>QKD Secure Bank Portal</h1>
+    </div>
+
+    <div class="container">
+        <h2>Account Balances</h2>
+        <!-- Display Account Balances -->
+        <div class="balances-section">
+            {% if accounts %}
+            <table class="balances-table">
+                <thead>
+                    <tr>
+                        <th>Account ID</th>
+                        <th>Account Holder</th>
+                        <th>Balance (INR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for acc in accounts %}
+                    <tr>
+                        <td>{{ acc.account_id }}</td>
+                        <td class="acc-name">{{ acc.customer_name }}</td>
+                        <td class="acc-balance">₹ {{ "%.2f"|format(acc.balance) }}</td> {# Format balance nicely #}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="text-align:center; color: #6c757d;">No accounts found. <a href="{{ url_for('register_customer') }}">Register a customer?</a></p>
+            {% endif %}
+        </div>
+
+        <hr>
+
+        <!-- Flash Messages Area -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flash-messages">
+                {% for category, message in messages %}
+                    <li class="flash-{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Transaction Input Form -->
+        <h3>Perform Secure Transfer</h3>
+        {% if accounts and accounts|length >= 2 %} {# Only show form if there are accounts to transfer between #}
+            <form action="{{ url_for('transfer_funds') }}" method="post">
+                <div class="form-grid">
+                    <div>
+                        <label for="sender_account_id">From Account:</label>
+                        <select id="sender_account_id" name="sender_account_id" required>
+                            <option value="" disabled selected>Select Sender Account</option>
+                            {% for acc in accounts %}
+                            <option value="{{ acc.account_id }}">{{ acc.account_id }} - {{ acc.customer_name }} (Bal: {{ "%.2f"|format(acc.balance) }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="receiver_account_id">To Account:</label>
+                         <select id="receiver_account_id" name="receiver_account_id" required>
+                            <option value="" disabled selected>Select Receiver Account</option>
+                             {% for acc in accounts %}
+                            <option value="{{ acc.account_id }}">{{ acc.account_id }} - {{ acc.customer_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                     <div>
+                        <label for="amount">Amount (INR):</label>
+                        {# Using text input with pattern for better cross-browser compatibility than number input styling #}
+                        <input type="text" id="amount" name="amount" placeholder="e.g., 500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount, e.g., 123.45">
+                    </div>
+                </div>
+
+                <!-- Simulate Eve Checkbox -->
+                <div class="eve-checkbox-container">
+                    <input type="checkbox" id="simulate_eve" name="simulate_eve" value="true">
+                    <label for="simulate_eve">Simulate Eavesdropper (Eve)? (Will introduce QKD errors & likely abort)</label>
+                </div>
+
+                <button type="submit">Initiate Transfer & Secure Log via QKD</button>
+            </form>
+        {% else %}
+             <p style="text-align:center; color: #6c757d;">Please <a href="{{ url_for('register_customer') }}">register at least two customers</a> to perform a transfer.</p>
+        {% endif %}
+
+
+        <!-- Display Result of the Last Action -->
+        {# Only show results section if a transfer attempt was made #}
+        {% if transfer_status is defined %}
+        <div class="result">
+            <strong class="result-title">Last Transfer Attempt Outcome</strong>
+
+             <p><span class="label">Overall Transfer Status:</span>
+                {% if transfer_status == "Success" %}
+                    <span class="status-success">Successful</span>
+                {% else %}
+                    <span class="status-fail">Failed</span> (See Message Above/Log)
+                {% endif %}
+            </p>
+
+            {% if qber_val is defined %} {# Show QKD section only if QKD was attempted #}
+            <p><span class="label">QKD Log Security Check:</span>
+                 {# Apply styling based on the specific QKD status #}
+                 {% set qkd_status_display = qkd_status | default('N/A') | replace("_", "-") | lower %}
+                 <span class="status-{{ qkd_status_display }}">
+                     {{ qkd_status | default('N/A') | replace("_", " ") }}
+                 </span>
+                 (QBER: <code>{{ qber_val }}</code>)
+            </p>
+            {% endif %}
+
+            {# Only show encryption details if QKD status was SECURED #}
+            {% if qkd_status == "SECURED" and encrypted_hex %}
+                <hr style="margin: 15px 0;">
+                <p><span class="label">Encrypted Confirmation (Hex):</span> <code>{{ encrypted_hex }}</code></p>
+                <p><span class="label">IV Used (Hex):</span> <code>{{ iv_hex }}</code></p>
+                {% if decrypted_text %}
+                     <p><span class="label">Decryption Verification:</span>
+                        {% if decrypted_text and 'Failed' not in decrypted_text and 'Mismatch' not in decrypted_text %}
+                           <span class="decryption-success">{{ decrypted_text }}</span>
+                       {% else %}
+                           <span class="decryption-failure">{{ decrypted_text | default('N/A') }}</span>
+                       {% endif %}
+                     </p>
+                {% endif %}
+                <p style="margin-top: 15px;"><small>Encrypted confirmation stored in transaction log.</small></p>
+            {% elif qkd_status not in ["SECURED", "TRANSFER_FAILED", "PENDING", "VALIDATION_FAIL"] and qkd_status is defined %}
+                 <p style="margin-top: 15px;"><small>(Confirmation log not encrypted due to QKD issue)</small></p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+
+         <!-- Navigation Links -->
+         <div class="nav-links">
+            <a href="{{ url_for('register_customer') }}">Register New Customer</a>
+            <a href="{{ url_for('history') }}">View Full Transaction Log</a>
+        </div>
+    </div>
+Quantum-Secure Banking Simulation © <span id="current-year"></span>
+</div> <!-- Close footer div -->
+
+{# Add JavaScript just before the closing body tag #}
+<script>
+    document.getElementById('current-year').textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

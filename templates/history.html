@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QKD Transaction Log History</title>
+     <style>
+        /* --- Consistent Styling --- */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #343a40; line-height: 1.6; display: flex; flex-direction: column; min-height: 100vh; }
+        .header { background-color: #6c757d; color: white; padding: 15px 40px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header h1 { margin: 0; font-size: 1.8rem; font-weight: 500; }
+        .container { background-color: #ffffff; padding: 30px 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); max-width: 1350px; /* Wider for more columns */ margin: 40px auto; flex-grow: 1; }
+        h2 { text-align: center; color: #495057; margin-bottom: 30px; font-weight: 500; }
+        /* --- Table Styles --- */
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        th, td { border: 1px solid #dee2e6; padding: 10px 12px; text-align: left; vertical-align: top; }
+        th { background-color: #6c757d; color: white; font-weight: 600; font-size: 0.85rem; letter-spacing: 0.5px; white-space: nowrap;}
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        tr:hover { background-color: #e9ecef; }
+        td { font-size: 0.8rem; color: #495057; } /* Smaller base font */
+        td.log-id { font-weight: 500; text-align: center; width: 4%; }
+        td.acc-details { width: 18%; font-size: 0.8rem;}
+        td.amount { font-family: monospace; text-align: right; width: 8%;}
+        td.status { font-weight: 500; width: 12%; text-align: center; font-size: 0.75rem;}
+        td.timestamp { white-space: nowrap; width: 15%; font-size: 0.75rem;}
+        td.hex-data { word-wrap: break-word; word-break: break-all; max-width: 220px; font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; color: #6c757d; font-size: 0.7rem; line-height: 1.4;} /* Smaller hex */
+        /* Status styling */
+        .status-SECURED { color: #198754; font-weight: bold;} /* Green */
+        .status-TRANSFER_FAILED, .status-QBER_THRESHOLD_EXCEEDED, .status-VALIDATION_FAIL { color: #dc3545; font-weight: bold;} /* Red */
+        .status-QBER_CALC_FAIL, .status-KEY_LENGTH_FAIL, .status-ENCRYPTION_FAIL { color: #6c757d; font-style: italic;} /* Grey/Italic */
+        td.qber { font-family: monospace; width: 6%; text-align: center;}
+        code { background-color: transparent; padding: 0; font-size: inherit; color: inherit;} /* Prevent extra code styling */
+        /* Flash Messages & Nav Link styling */
+        .flash-messages { list-style: none; padding: 0; margin: 0 0 25px 0; }
+        .flash-messages li { padding: 15px 20px; margin-bottom: 15px; border-radius: 5px; border: 1px solid transparent; font-weight: 500; }
+        .flash-error { background-color: #f8d7da; color: #842029; border-color: #f5c2c7; }
+        .nav-links { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;}
+        .nav-links a { color: #0d6efd; text-decoration: none; font-weight: 500; padding: 8px 15px; border: 1px solid #dee2e6; border-radius: 5px; transition: background-color 0.2s ease, color 0.2s ease; margin: 5px;}
+        .nav-links a:hover { background-color: #e9ecef; color: #0a58ca; text-decoration: none; }
+        .no-transactions { text-align: center; color: #6c757d; margin-top: 30px; font-style: italic; padding: 20px; background-color: #f8f9fa; border-radius: 5px; }
+        .footer { text-align: center; margin-top: 40px; padding: 20px; font-size: 0.9em; color: #6c757d; border-top: 1px solid #dee2e6; background-color: #f1f3f5;}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>QKD Secure Bank Portal - Transaction Log</h1>
+    </div>
+
+    <div class="container">
+        <h2>Transaction Log History</h2>
+
+        <!-- Flash Messages -->
+         {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flash-messages">
+                {% for category, message in messages %}
+                    {% if category == 'error' %}
+                        <li class="flash-{{ category }}">{{ message }}</li>
+                    {% endif %}
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Transaction Table -->
+        {% if log_entries %}
+        <div style="overflow-x:auto;"> <!-- Make table horizontally scrollable on small screens -->
+            <table>
+                <thead>
+                    <tr>
+                        <th>Log ID</th>
+                        <th>Timestamp</th>
+                        <th>Sender</th>
+                        <th>Receiver</th>
+                        <th>Amount (INR)</th>
+                        <th>QKD Status</th>
+                        <th>QBER</th>
+                        <th>Encrypted Confirmation (Hex)</th>
+                        <th>IV (Hex)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in log_entries %}
+                    <tr>
+                        <td class="log-id">{{ entry.id }}</td>
+                        <td class="timestamp">{{ entry.timestamp }}</td>
+                        <td class="acc-details">{{ entry.sender }}</td>
+                        <td class="acc-details">{{ entry.receiver }}</td>
+                        <td class="amount">₹ {{ entry.amount }}</td>
+                        {# Apply dynamic class based on status #}
+                        <td class="status status-{{ entry.qkd_status }}">{{ entry.qkd_status | replace("_", " ") }}</td>
+                        <td class="qber">{{ entry.qber }}</td>
+                        <td class="hex-data"><code>{{ entry.encrypted_hex if entry.encrypted_hex != 'N/A' else '--' }}</code></td>
+                        <td class="hex-data"><code>{{ entry.iv_hex if entry.iv_hex != 'N/A' else '--'}}</code></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="no-transactions">No transaction logs found.</p>
+        {% endif %}
+
+        <!-- Navigation -->
+        <div class="nav-links">
+             <a href="{{ url_for('index') }}">Back to Transfers Page</a>
+             <a href="{{ url_for('register_customer') }}">Register New Customer</a>
+        </div>
+    </div>
+
+     Quantum-Secure Banking Simulation © <span id="current-year"></span>
+</div> <!-- Close footer div -->
+
+<script>
+    document.getElementById('current-year').textContent = new Date().getFullYear();
+</script>
+</body>
+</html>
