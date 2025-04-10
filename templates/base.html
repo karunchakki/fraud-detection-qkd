@@ -3,165 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- The title block can be overridden by child templates -->
-    <title>{% block title %}QKD Secure Bank{% endblock %}</title>
-    <style>
-        /* --- Base Styling (Consistent across pages) --- */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            margin: 0; padding: 0;
-            background-color: #f8f9fa;
-            color: #343a40;
-            line-height: 1.6;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
-        .header {
-            background-color: #0d6efd;
-            color: white;
-            padding: 15px 40px;
-            display: flex; /* Use flexbox for alignment */
-            justify-content: space-between; /* Space out title and nav */
-            align-items: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .header h1 {
-            margin: 0;
-            font-size: 1.6rem; /* Slightly smaller main title */
-            font-weight: 500;
-        }
-        .header h1 a {
-             color: white;
-             text-decoration: none;
-        }
-        .header-nav ul {
-            list-style: none;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            align-items: center; /* Vertically align nav items */
-        }
-        .header-nav li {
-            margin-left: 15px; /* Adjust spacing */
-        }
-         /* Style for welcome message */
-        .header-nav li.welcome-user {
-             margin-right: 15px; /* Space before links */
-             font-size: 0.9rem;
-             color: #e9ecef; /* Lighter color for welcome message */
-        }
-        .header-nav a {
-            color: #ffffff;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.95rem;
-            padding: 6px 12px; /* Adjusted padding */
-            border-radius: 4px;
-            transition: background-color 0.2s ease;
-        }
-        .header-nav a:hover, .header-nav a.active {
-            background-color: rgba(255, 255, 255, 0.15);
-        }
-         /* Logout link style */
-        .header-nav a.logout-link {
-            background-color: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-         .header-nav a.logout-link:hover {
-             background-color: rgba(220, 53, 69, 0.8); /* Reddish hover */
-             border-color: rgba(220, 53, 69, 0);
-         }
+    <title>{% block title %}Quantum Secure Bank{% endblock %}</title>
+    <!-- Link to Tailwind CSS via CDN (ensure this is present) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+     <!-- Optional: Favicon Link -->
+    <!-- <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}"> -->
 
-        .container {
-            background-color: #ffffff;
-            padding: 30px 40px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            max-width: 950px; /* Default max width, can be overridden */
-            margin: 30px auto; /* Center container */
-            flex-grow: 1; /* Allow container to fill space */
-        }
-        .footer {
-            text-align: center;
-            margin-top: auto; /* Push footer down */
-            padding: 20px;
-            font-size: 0.9em;
-            color: #6c757d;
-            border-top: 1px solid #dee2e6;
-            background-color: #f1f3f5;
-        }
-        /* Flash Messages (Common Style) */
-        .flash-messages { list-style: none; padding: 0; margin: 0 0 25px 0; }
-        .flash-messages li { padding: 15px 20px; margin-bottom: 15px; border-radius: 5px; border: 1px solid transparent; font-weight: 500; }
-        .flash-success { background-color: #d1e7dd; color: #0f5132; border-color: #badbcc; }
-        .flash-error { background-color: #f8d7da; color: #842029; border-color: #f5c2c7; }
-        .flash-warning { background-color: #fff3cd; color: #664d03; border-color: #ffecb5; }
-        .flash-info { background-color: #cff4fc; color: #055160; border-color: #b6effb; }
+    <!-- Block for extra head elements like page-specific CSS or meta tags -->
+    {% block head_extra %}{% endblock %}
 
-        /* --- General Form Styling --- */
-        label { display: block; margin-bottom: 8px; font-weight: 600; color: #495057; }
-        input[type="text"], input[type="password"], input[type="number"], select {
-            width: 100%; box-sizing: border-box; padding: 12px 10px; margin-bottom: 20px;
-            border: 1px solid #ced4da; border-radius: 4px; font-size: 1rem;
-            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-            background-color: #fff;
-        }
-        input:focus, select:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25); }
-        button[type="submit"] {
-            color: white; padding: 12px 25px; border: none; border-radius: 5px; cursor: pointer;
-            font-size: 1.1rem; font-weight: 500; width: 100%; transition: background-color 0.2s ease;
-            margin-top: 10px;
-        }
-        .button-primary { background-color: #0d6efd; } /* Blue */
-        .button-primary:hover { background-color: #0b5ed7; }
-        .button-success { background-color: #198754; } /* Green */
-        .button-success:hover { background-color: #157347; }
-        .nav-link { display: block; margin-top: 30px; text-align: center; }
-        .nav-link a { color: #0d6efd; text-decoration: none; font-weight: 500; margin: 0 10px;}
-        .nav-link a:hover { text-decoration: underline; }
-
-        /* Block for specific page styles */
-        {% block head_style %}{% endblock %}
-    </style>
 </head>
-<body>
-    <header class="header">
-        <h1><a href="{{ url_for('index') }}">QKD Secure Bank Portal</a></h1>
-        <nav class="header-nav">
-            <ul>
-                <!-- Use session_user injected by context processor -->
+<body class="bg-gray-100 font-sans leading-normal tracking-normal flex flex-col min-h-screen">
+
+    <!-- Header Navigation -->
+    <nav class="bg-gradient-to-r from-indigo-600 to-purple-700 shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Logo/Brand -->
+                <div class="flex-shrink-0">
+                    <a href="{{ url_for('index') }}" class="text-white text-xl font-bold flex items-center">
+                        <!-- Optional: Add an SVG logo here -->
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                        QKD Bank Portal
+                    </a>
+                </div>
+
+                <!-- Navigation Links -->
+                <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-4">
+                        {% if session_user %}
+                            <!-- Links for Logged-in Users -->
+                            <a href="{{ url_for('index') }}" class="{% if request.endpoint == 'index' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Dashboard</a>
+                            <a href="{{ url_for('history') }}" class="{% if request.endpoint == 'history' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">History</a>
+                            <a href="{{ url_for('qkd_page') }}" class="{% if request.endpoint == 'qkd_page' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">QKD Sim</a>
+                             <a href="{{ url_for('fraud_page') }}" class="{% if request.endpoint == 'fraud_page' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Fraud Report</a>
+                             <a href="{{ url_for('quantum_impact') }}" class="{% if request.endpoint == 'quantum_impact' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Quantum Impact</a>
+                             <a href="{{ url_for('about') }}" class="{% if request.endpoint == 'about' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">About</a>
+                            <!-- Optional Risk Link -->
+                            {# <a href="{{ url_for('risk_page') }}" class="{% if request.endpoint == 'risk_page' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Risk Sim</a> #}
+
+                             <span class="text-gray-300 px-3 py-2 rounded-md text-sm font-medium">|</span>
+                             <span class="text-indigo-200 px-3 py-2 rounded-md text-sm font-medium">Welcome, {{ session_user.name }}!</span>
+                             <a href="{{ url_for('logout') }}" class="text-red-200 bg-red-700 bg-opacity-50 hover:bg-red-600 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Logout</a>
+
+                        {% else %}
+                            <!-- Links for Logged-out Users -->
+                             <a href="{{ url_for('quantum_impact') }}" class="{% if request.endpoint == 'quantum_impact' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Quantum Impact</a>
+                             <a href="{{ url_for('about') }}" class="{% if request.endpoint == 'about' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">About</a>
+                            <a href="{{ url_for('login') }}" class="{% if request.endpoint == 'login' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Login</a>
+                            <a href="{{ url_for('register_customer') }}" class="{% if request.endpoint == 'register_customer' %}bg-indigo-700 text-white{% else %}text-indigo-100 hover:bg-indigo-500 hover:text-white{% endif %} px-3 py-2 rounded-md text-sm font-medium transition duration-150 ease-in-out">Register</a>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Mobile Menu Button (Placeholder - requires JS for functionality) -->
+                <div class="-mr-2 flex md:hidden">
+                    <button type="button" class="bg-indigo-600 inline-flex items-center justify-center p-2 rounded-md text-indigo-200 hover:text-white hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-indigo-600 focus:ring-white" aria-controls="mobile-menu" aria-expanded="false">
+                        <span class="sr-only">Open main menu</span>
+                        <!-- Icon when menu is closed. -->
+                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                        <!-- Icon when menu is open. -->
+                        <svg class="hidden h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile menu, show/hide based on menu state. (Placeholder - requires JS) -->
+        <div class="md:hidden hidden" id="mobile-menu">
+             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
                 {% if session_user %}
-                    <li class="welcome-user">Welcome, {{ session_user.name }}!</li>
-                    <li><a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' else '' }}">Transfer</a></li>
-                    <li><a href="{{ url_for('history') }}" class="{{ 'active' if request.endpoint == 'history' else '' }}">History</a></li>
-                    <li><a href="{{ url_for('logout') }}" class="logout-link">Logout</a></li>
+                    <a href="{{ url_for('index') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'index' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">Dashboard</a>
+                    <a href="{{ url_for('history') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'history' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">History</a>
+                    <a href="{{ url_for('qkd_page') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'qkd_page' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">QKD Sim</a>
+                    <a href="{{ url_for('fraud_page') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'fraud_page' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">Fraud Report</a>
+                    <a href="{{ url_for('quantum_impact') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'quantum_impact' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">Quantum Impact</a>
+                    <a href="{{ url_for('about') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'about' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">About</a>
+                    <hr class="border-indigo-400 my-2">
+                    <span class="text-indigo-200 block px-3 py-2 text-base font-medium">Welcome, {{ session_user.name }}!</span>
+                    <a href="{{ url_for('logout') }}" class="text-red-200 bg-red-700 bg-opacity-50 block px-3 py-2 rounded-md text-base font-medium hover:bg-red-600 hover:text-white">Logout</a>
                 {% else %}
-                    <li><a href="{{ url_for('login') }}" class="{{ 'active' if request.endpoint == 'login' else '' }}">Login</a></li>
-                    <li><a href="{{ url_for('register_customer') }}" class="{{ 'active' if request.endpoint == 'register_customer' else '' }}">Register</a></li>
+                     <a href="{{ url_for('quantum_impact') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'quantum_impact' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">Quantum Impact</a>
+                     <a href="{{ url_for('about') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'about' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">About</a>
+                    <a href="{{ url_for('login') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'login' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">Login</a>
+                    <a href="{{ url_for('register_customer') }}" class="text-white block px-3 py-2 rounded-md text-base font-medium {% if request.endpoint == 'register_customer' %}bg-indigo-700{% else %}hover:bg-indigo-500{% endif %}">Register</a>
                 {% endif %}
-            </ul>
-        </nav>
-    </header>
+             </div>
+        </div>
+    </nav>
 
-    <main class="container {% block container_class %}{% endblock %}">
-         <!-- Flash Messages Area -->
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <ul class="flash-messages">
-                {% for category, message in messages %}
-                    <li class="flash-{{ category }}">{{ message }}</li>
-                {% endfor %}
-                </ul>
-            {% endif %}
-        {% endwith %}
+    <!-- Main Content Area -->
+    <main class="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Container for main page content with background and shadow -->
+        <div class="bg-white p-6 sm:p-8 rounded-lg shadow-lg {% block container_class %}{% endblock %}">
 
-        <!-- Main content block overridden by child templates -->
-        {% block content %}{% endblock %}
+            <!-- Flash Messages Area -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="mb-6 space-y-3">
+                    {% for category, message in messages %}
+                        {% set category_map = {'success': 'green', 'error': 'red', 'warning': 'yellow', 'info': 'blue'} %}
+                        {% set color = category_map.get(category, 'gray') %}
+                        <div class="p-4 border-l-4 border-{{ color }}-500 bg-{{ color }}-100 text-{{ color }}-800 rounded-md shadow-sm" role="alert">
+                            <p class="font-medium">{{ message }}</p>
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <!-- Main content block overridden by child templates -->
+            {% block content %}{% endblock %}
+
+        </div> {# End of inner container #}
     </main>
 
-    <footer class="footer">
-        Quantum-Secure Banking Simulation © <span id="current-year"></span> {# Span for JS to target #}
+    <!-- Footer -->
+    <footer class="bg-gray-200 border-t border-gray-300 text-center py-4 mt-auto">
+        <p class="text-sm text-gray-600">
+            Quantum-Secure Banking Simulation © <span id="current-year"></span>
+             - For Educational & Demonstration Purposes Only.
+        </p>
     </footer>
 
     <!-- JavaScript for dynamic year -->
@@ -170,6 +138,21 @@
         if (yearSpan) {
             yearSpan.textContent = new Date().getFullYear();
         }
+         // Basic JS for mobile menu toggle (optional)
+        const btn = document.querySelector("button[aria-controls='mobile-menu']");
+        const menu = document.querySelector("#mobile-menu");
+        const openIcon = btn.querySelector("svg.block");
+        const closeIcon = btn.querySelector("svg.hidden");
+
+        btn.addEventListener("click", () => {
+        const isExpanded = menu.classList.toggle("hidden");
+        btn.setAttribute("aria-expanded", !isExpanded);
+        openIcon.classList.toggle("hidden");
+        openIcon.classList.toggle("block");
+        closeIcon.classList.toggle("hidden");
+        closeIcon.classList.toggle("block");
+        });
+
     </script>
     <!-- Block for page-specific scripts -->
     {% block scripts %}{% endblock %}

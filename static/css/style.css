@@ -1,0 +1,50 @@
+/* static/css/styles.css */
+
+@layer base {
+    /* Example: Define smooth scrolling globally if desired */
+    /* html {
+        scroll-behavior: smooth;
+    } */
+
+    /* Example: Custom font loading or base font adjustments if not covered by Tailwind */
+    /* body {
+        font-family: 'Your Custom Font', sans-serif;
+    } */
+}
+
+@layer components {
+    /* Example: Define a reusable custom component style */
+    /* .btn-custom-gradient {
+        @apply py-2 px-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-lg shadow-md hover:from-cyan-600 hover:to-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition duration-150 ease-in-out;
+    } */
+}
+
+@layer utilities {
+    /* Example: Define a custom utility class */
+    /* .text-shadow-sm {
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    } */
+}
+
+/* Add any non-Tailwind-related CSS below */
+
+/* Styling for the Chart.js canvas container for consistent padding/background */
+#qberChartContainer { /* Optional: Add an ID to the div containing the canvas */
+    @apply p-4 bg-white rounded-lg shadow border border-gray-200;
+}
+
+/* Slight adjustment for particle container if needed */
+#particles-js {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    z-index: 0; /* Ensure it's behind content */
+}
+
+/* Ensure main content is layered above particles */
+body > nav, body > main, body > footer {
+    position: relative;
+    z-index: 1;
+}

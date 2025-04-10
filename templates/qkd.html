@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}QKD BB84 Simulation Details{% endblock %}
+
+{% block head_extra %}
+    {# Include Chart.js CDN library #}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{# Remove the old head_style block #}
+
+{% block content %}
+    <h2 class="text-3xl font-semibold text-gray-800 mb-8 text-center">BB84 QKD Protocol Simulation Details</h2>
+
+    <!-- Simulation Output Display -->
+    {% if simulation_log %} {# Check if results from the last run exist in the session #}
+        <div class="space-y-8">
+
+            {# Summary Box #}
+            <div class="bg-gray-50 p-6 rounded-lg border border-gray-200 shadow-sm">
+                <h3 class="text-lg font-semibold text-gray-700 mb-3">Run Summary</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div><span class="font-medium text-gray-600">Initial Qubits:</span> {{ simulation_log.initial_qubits }}</div>
+                    <div><span class="font-medium text-gray-600">Sifted Bits:</span> {{ simulation_log.sifted_indices_count }}</div>
+                    <div><span class="font-medium text-gray-600">QBER Samples:</span> {{ simulation_log.qber_sample_count }}</div>
+                    <div><span class="font-medium text-gray-600">Final Key Length:</span> {{ simulation_log.final_key_length }}</div>
+                    <div class="col-span-2 md:col-span-1"><span class="font-medium text-gray-600">Eve Simulated?:</span>
+                        <span class="{{ 'text-red-600 font-semibold' if simulation_log.eve_simulated else 'text-green-600' }}">
+                            {{ 'Yes' if simulation_log.eve_simulated else 'No' }}
+                        </span>
+                    </div>
+                     <div class="col-span-2 md:col-span-3"><span class="font-medium text-gray-600">QBER:</span>
+                        <span class="font-mono font-semibold {{ 'text-red-600' if simulation_log.qber > QBER_THRESHOLD else ('text-green-600' if simulation_log.qber >= 0 else 'text-gray-500') }}">
+                            {{ "%.4f" | format(simulation_log.qber) if simulation_log.qber >= 0 else 'Calc Failed' }}
+                        </span>
+                        (<span class="font-semibold {{ 'text-red-600' if simulation_log.eve_detected else 'text-green-600' }}">
+                            {{ 'EVE DETECTED!' if simulation_log.eve_detected else 'Threshold OK' }}
+                        </span>)
+                    </div>
+                </div>
+            </div>
+
+            <hr class="border-gray-200">
+
+            {# Initial State & Measurement Choices #}
+            <div>
+                <h4 class="text-xl font-semibold text-gray-700 mb-4">1. Initial State & Measurement Choices</h4>
+                 <p class="text-sm text-gray-600 mb-3">(Showing first {{ simulation_log.alice_bits | length }} qubits. Basis: 0=Z, 1=X. Green = Bases Match)</p>
+                 <div class="overflow-x-auto text-xs border rounded-md">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-100">
+                            <tr>
+                                <th class="px-3 py-2 font-medium text-gray-600">Qubit #</th>
+                                <th class="px-3 py-2 font-medium text-gray-600">Alice Bit</th>
+                                <th class="px-3 py-2 font-medium text-gray-600">Alice Basis</th>
+                                <th class="px-3 py-2 font-medium text-gray-600">Bob Basis</th>
+                            </tr>
+                        </thead>
+                        <tbody class="font-mono">
+                             {% for i in range(simulation_log.alice_bits | length) %}
+                                {% set bases_match = simulation_log.alice_bases[i] == simulation_log.bob_bases[i] %}
+                                <tr class="text-center {{ 'bg-green-50' if bases_match else 'bg-red-50' }}">
+                                    <td class="px-3 py-1 border-t">{{ i }}</td>
+                                    <td class="px-3 py-1 border-t">{{ simulation_log.alice_bits[i] }}</td>
+                                    <td class="px-3 py-1 border-t">{{ simulation_log.alice_bases[i] }}</td>
+                                    <td class="px-3 py-1 border-t">{{ simulation_log.bob_bases[i] }}</td>
+                                </tr>
+                             {% endfor %}
+                        </tbody>
+                    </table>
+                 </div>
+            </div>
+
+            <hr class="border-gray-200">
+
+            {# Bob's Measurement & Eve's Potential Impact #}
+            <div>
+                 <h4 class="text-xl font-semibold text-gray-700 mb-4">2. Bob's Measurement Outcome {% if simulation_log.eve_simulated %}<span class="text-red-600">(Potential Eve Impact)</span>{% endif %}</h4>
+                 {% if simulation_log.eve_simulated %}
+                    <p class="text-sm text-red-600 mb-2">Eve simulation was active (Rate: {{ simulation_log.eve_error_rate_used }}), introducing approx. {{ simulation_log.eve_errors_introduced }} errors into Bob's results below.</p>
+                 {% endif %}
+                 <span class="text-sm font-medium text-gray-600 block mb-1">Bob's Measured Bits (Sample):</span>
+                 <pre><code class="text-xs p-3 bg-gray-100 border rounded-md block max-h-24 overflow-y-auto font-mono">{{ simulation_log.bob_measurement_results | join('') }}</code></pre>
+            </div>
+
+            <hr class="border-gray-200">
+
+            {# Sifting & QBER Check Visualization #}
+            <div>
+                 <h4 class="text-xl font-semibold text-gray-700 mb-4">3. Sifting & QBER Check</h4>
+                 <p class="text-sm text-gray-600 mb-3">(Showing bits where bases matched. Grayed out = Used for QBER. <span class="text-red-600 font-semibold">Red Bit</span> = Disagreement/Error.)</p>
+                 <div class="overflow-x-auto text-xs border rounded-md">
+                     <table class="min-w-full">
+                         <thead class="bg-gray-100">
+                             <tr>
+                                <th class="px-3 py-2 font-medium text-gray-600">Orig. Index</th>
+                                <th class="px-3 py-2 font-medium text-gray-600">Alice Sifted</th>
+                                <th class="px-3 py-2 font-medium text-gray-600">Bob Sifted</th>
+                                <th class="px-3 py-2 font-medium text-gray-600">Status</th>
+                             </tr>
+                         </thead>
+                         <tbody class="font-mono">
+                            {# Need to reconstruct this view based on available data #}
+                            {# We don't have the full sifted lists and QBER indices easily available in the log #}
+                            {# Placeholder text indicating limitation #}
+                             <tr><td colspan="4" class="text-center italic text-gray-500 p-4">Detailed sifted bit comparison visualization requires more granular logging data than currently stored in session. QBER summary is accurate.</td></tr>
+                             {# Actual implementation would iterate through sifted bits and check against QBER indices set #}
+                         </tbody>
+                     </table>
+                 </div>
+
+                 {# QBER Result Summary #}
+                 <div class="mt-4 text-center p-4 rounded-md font-semibold
+                    {% if simulation_log.eve_detected %}bg-red-100 text-red-700 border border-red-300
+                    {% elif simulation_log.qber >= 0 %}bg-green-100 text-green-700 border border-green-300
+                    {% else %}bg-yellow-100 text-yellow-700 border border-yellow-300
+                    {% endif %}">
+                    Calculated QBER: {{ "%.4f" | format(simulation_log.qber) if simulation_log.qber >= 0 else 'N/A' }}
+                    ({{ "%.2f" | format(simulation_log.qber * 100) if simulation_log.qber >= 0 else 'N/A' }}%)
+                    - Status:
+                    {% if simulation_log.eve_detected %}
+                        EAVESDROPPING DETECTED (Above {{ "%.2f" | format(QBER_THRESHOLD * 100) }}% Threshold!)
+                    {% elif simulation_log.qber >= 0 %}
+                        SECURE (Below Threshold)
+                    {% else %}
+                        QBER CALCULATION FAILED
+                    {% endif %}
+                 </div>
+            </div>
+
+             <hr class="border-gray-200">
+
+            {# Final Key Result #}
+            <div>
+                 <h4 class="text-xl font-semibold text-gray-700 mb-4">4. Final Generated Key</h4>
+                 {% if simulation_log.final_key_binary %}
+                    <span class="text-sm font-medium text-gray-600 block mb-1">Final Shared Key ({{ simulation_log.final_key_length }} bits):</span>
+                    <pre><code class="text-xs p-3 bg-gray-100 border rounded-md block max-h-24 overflow-y-auto font-mono">{{ simulation_log.final_key_binary }}</code></pre>
+                 {% elif simulation_log.eve_detected %}
+                    <p class="text-red-600 font-semibold p-3 bg-red-50 border border-red-200 rounded-md">No final key generated due to high QBER / Eve detection.</p>
+                 {% else %}
+                     <p class="text-yellow-700 font-semibold p-3 bg-yellow-50 border border-yellow-200 rounded-md">No final key generated (Reason: {{ 'Insufficient bits after QBER check' if simulation_log.qber >= 0 else 'QKD Failure' }}).</p>
+                 {% endif %}
+            </div>
+
+            {# Chart.js graph #}
+            <hr class="border-gray-200">
+            <div>
+                <h4 class="text-xl font-semibold text-gray-700 mb-4">QBER History (Simulation - Placeholder Data)</h4>
+                 <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+                    <canvas id="qberChart"></canvas> {# Chart.js targets this #}
+                 </div>
+            </div>
+
+        </div> {# End of main results container #}
+
+    {% else %}
+        {# Message if no simulation log found in session #}
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 p-4 rounded-md shadow-sm" role="alert">
+            <div class="flex">
+                <div class="py-1"><svg class="fill-current h-6 w-6 text-yellow-500 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM9 11v-4h2v4H9zm0 4h2v-2H9v2z"/></svg></div>
+                <div>
+                    <p class="font-bold">No Simulation Data Found</p>
+                    <p class="text-sm">Please run the QKD Simulation from the dashboard first to see detailed results here.</p>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+    <!-- Navigation back to main page -->
+    <div class="mt-10 text-center border-t border-gray-200 pt-6">
+        <a href="{{ url_for('index') }}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-300 text-sm">
+            ← Back to Dashboard
+        </a>
+    </div>
+
+{% endblock %}
+
+{% block scripts %}
+{# Basic Chart.js example - data needs to be passed from Flask for real use #}
+<script>
+    document.addEventListener('DOMContentLoaded', function () { // Ensure DOM is loaded
+        const ctx = document.getElementById('qberChart');
+        if (ctx) {
+            // --- Sample Data ---
+            // TODO: Replace this with actual data injected by Flask
+            const qberHistoryData = [0.5, 1.2, 0.8, 25.1, 0.3]; // Example QBER percentages from past runs
+            const qberLabels = ['Run 1', 'Run 2', 'Run 3', 'Run 4 (Eve?)', 'Run 5']; // Example labels
+            const qberThresholdValue = {{ QBER_THRESHOLD | default(0.15) }} * 100; // Get threshold from Flask config, convert to %
+
+            new Chart(ctx, {
+                type: 'line', // Line chart for trend
+                data: {
+                    labels: qberLabels,
+                    datasets: [{
+                        label: 'Simulated QBER (%)',
+                        data: qberHistoryData,
+                        borderColor: 'rgb(59, 130, 246)', // Blue line
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true, // Optional: fill below line
+                        tension: 0.1 // Slight curve
+                     },
+                     { // Dataset for the threshold line
+                        label: 'QBER Threshold (%)',
+                        data: Array(qberLabels.length).fill(qberThresholdValue), // Array with threshold value
+                        borderColor: 'rgb(239, 68, 68)', // Red line for threshold
+                        borderDash: [5, 5], // Dashed line
+                        pointRadius: 0, // No points on the threshold line
+                        fill: false,
+                        tension: 0
+                     }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false, // Allow chart to adapt height
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'QBER (%)' },
+                            suggestedMax: Math.max(30, qberThresholdValue * 1.2) // Set max y-axis slightly above threshold or 30
+                        },
+                        x: {
+                            title: {display: true, text: 'Simulation Run'}
+                        }
+                    },
+                     plugins: {
+                         legend: {
+                             position: 'top',
+                         },
+                         tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                         }
+                    }
+                }
+            });
+        } else {
+            console.log("Chart canvas element 'qberChart' not found.");
+        }
+    });
+</script>
+{% endblock %}

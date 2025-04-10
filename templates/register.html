@@ -2,46 +2,80 @@
 
 {% block title %}Register - QKD Secure Bank{% endblock %}
 
-{% block container_class %}container-narrow{% endblock %} {# Optional: Override container class for narrower width #}
-
-{% block head_style %}
-<style>
-    /* --- Use similar styling as previous 'best' templates --- */
-    .container-narrow { max-width: 550px; }
-    h2 { text-align: center; color: #495057; margin-bottom: 20px; font-weight: 500; }
-    p.info { text-align: center; color: #6c757d; margin-top: -10px; margin-bottom: 30px; font-size: 0.9rem;}
-    form div { margin-bottom: 15px; } /* Spacing between form fields */
-    button[type="submit"] { background-color: #198754; } /* Green for create */
-    button[type="submit"]:hover { background-color: #157347; } /* Darker green */
-    .nav-link a { color: #0d6efd; }
-</style>
-{% endblock %}
+{# Remove the old head_style and container_class blocks #}
 
 {% block content %}
-    <h2>Register New Customer</h2>
-    {# Access INITIAL_BALANCE passed from the route via context processor #}
-    <p class="info">An account with ₹{{ "%.2f"|format(INITIAL_BALANCE | default(1000.00)) }} balance will be created automatically.</p>
+    <div class="max-w-md mx-auto"> {# Center the narrower box for registration #}
+        <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
+            Register New Customer
+        </h2>
+        {# Access INITIAL_BALANCE passed from the route via context processor #}
+        <p class="mt-2 text-center text-sm text-gray-600">
+            An account with ₹{{ "%.2f"|format(INITIAL_BALANCE | default(1000.00)) }} balance will be created.
+        </p>
 
-    <!-- Registration Form -->
-    <form action="{{ url_for('register_customer') }}" method="post" novalidate> {# Added novalidate #}
-        <div>
-            <label for="customer_name">Full Name:</label>
-            <input type="text" id="customer_name" name="customer_name" placeholder="Enter unique name for login" required minlength="2" value="{{ request.form.customer_name or '' }}"> {# Keep value on error #}
+        {# Flash messages will be displayed here by the base template #}
+
+        <!-- Registration Form -->
+        <form class="mt-8 space-y-6" action="{{ url_for('register_customer') }}" method="post" novalidate>
+            <div>
+                <label for="customer_name" class="block text-sm font-medium text-gray-700">
+                    Full Name (used for login)
+                </label>
+                <div class="mt-1">
+                    <input id="customer_name" name="customer_name" type="text" autocomplete="name" required minlength="2"
+                           value="{{ request.form.customer_name or '' }}" {# Keep value on error #}
+                           class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                           placeholder="Enter unique name">
+                </div>
+            </div>
+
+             <div>
+                <label for="password" class="block text-sm font-medium text-gray-700">
+                    Password <span class="text-xs text-gray-500">(min 6 characters)</span>
+                </label>
+                <div class="mt-1">
+                    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="6"
+                           class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                           placeholder="Password">
+                 </div>
+             </div>
+
+             <div>
+                <label for="confirm_password" class="block text-sm font-medium text-gray-700">
+                    Confirm Password
+                </label>
+                <div class="mt-1">
+                    <input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required minlength="6"
+                           class="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                           placeholder="Confirm Password">
+                 </div>
+             </div>
+
+            <div>
+                <button type="submit"
+                        class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                         <!-- Heroicon name: solid/user-add -->
+                        <svg class="h-5 w-5 text-green-500 group-hover:text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 11a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1v-1z" />
+                          </svg>
+                    </span>
+                    Register & Create Account
+                </button>
+            </div>
+        </form>
+
+        <!-- Navigation Links -->
+        <div class="mt-6 text-center text-sm">
+            <p class="text-gray-600">
+                Already registered?
+                <a href="{{ url_for('login') }}" class="font-medium text-indigo-600 hover:text-indigo-500">
+                    Sign in
+                </a>
+            </p>
+            {# Removed link back to main page - user needs to register or login #}
+            {# | <a href="{{ url_for('index') }}">Back to Main Page</a> #}
         </div>
-         <div>
-            <label for="password">Password (min 6 chars):</label>
-            <input type="password" id="password" name="password" required minlength="6">
-         </div>
-         <div>
-            <label for="confirm_password">Confirm Password:</label>
-            <input type="password" id="confirm_password" name="confirm_password" required minlength="6">
-         </div>
-        <button type="submit" class="button-success">Register & Create Account</button>
-    </form>
-
-    <!-- Navigation Links -->
-    <div class="nav-link">
-        <a href="{{ url_for('login') }}">Already registered? Login</a> |
-        <a href="{{ url_for('index') }}">Back to Main Page</a> {# Changed link text #}
     </div>
 {% endblock %}

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}About Quantum Security & Banking - QKD Bank{% endblock %}
+
+{# Remove the old head_style block #}
+
+{% block content %}
+    <h2 class="text-3xl font-semibold text-gray-800 mb-10 text-center">About Quantum Security in Banking</h2>
+
+    <div class="space-y-10 text-gray-700 text-base leading-relaxed max-w-4xl mx-auto"> {# Container for text content #}
+
+        <!-- What is Quantum Computing? -->
+        <section>
+            <h3 class="text-2xl font-semibold text-indigo-700 mb-3 border-b pb-2">What is Quantum Computing?</h3>
+            <p>
+                Quantum computing harnesses the principles of quantum mechanics—like <strong class="text-indigo-600">superposition</strong> (existing in multiple states at once) and <strong class="text-indigo-600">entanglement</strong> (linked fates of particles)—to perform calculations fundamentally differently than classical computers. For specific problems, this offers the potential for exponential speedups.
+            </p>
+            <p class="mt-2">
+                While still an emerging technology, the anticipated power of future quantum computers poses a significant threat to current cryptographic algorithms (such as RSA and ECC) that rely on mathematical problems believed to be hard for classical computers but easy for quantum ones.
+            </p>
+        </section>
+
+        <!-- What is QKD? -->
+        <section>
+            <h3 class="text-2xl font-semibold text-indigo-700 mb-3 border-b pb-2">What is Quantum Key Distribution (QKD)?</h3>
+            <p>
+                QKD is a secure communication technique that uses quantum mechanics to establish a shared, secret cryptographic key between two authenticated parties (often called Alice and Bob).
+            </p>
+            <p class="mt-2">
+                Its unique security guarantee comes from the fact that observing a quantum system inevitably disturbs it. Any attempt by an eavesdropper (Eve) to intercept and measure the quantum states being exchanged will introduce detectable anomalies (errors) in the transmission, alerting Alice and Bob. This allows them to discard the potentially compromised key and try again.
+            </p>
+        </section>
+
+         <!-- How Does BB84 Work? -->
+        <section>
+            <h3 class="text-2xl font-semibold text-indigo-700 mb-3 border-b pb-2">How Does the BB84 Protocol Work?</h3>
+            <p class="mb-4">
+                The BB84 protocol (Bennett & Brassard, 1984), simulated in this application, is a foundational QKD protocol:
+            </p>
+            <ol class="list-decimal space-y-3 pl-6 mb-6">
+                <li><strong>Preparation (Alice):</strong> Alice generates random bits and randomly chooses one of two <span class="font-semibold">bases</span> (e.g., Rectilinear <code class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-mono text-sm">+</code> or Diagonal <code class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-mono text-sm">x</code>) to encode each bit onto a quantum state (like a photon's polarization).</li>
+                <li><strong>Transmission:** Alice sends the prepared quantum states to Bob over a quantum channel.</li>
+                <li><strong>Measurement (Bob):</strong> Bob also randomly chooses a basis (<code class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-mono text-sm">+</code> or <code class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded font-mono text-sm">x</code>) to measure each incoming state.</li>
+                <li><strong>Basis Reconciliation:** Over a public (but authenticated) classical channel, Alice and Bob compare the <span class="font-semibold">sequence of bases</span> they used for each transmission. They keep only the measurement results where their basis choices matched.</li>
+                <li><strong>Sifting:** Discarding the results from mismatched bases yields the shorter "sifted key".</li>
+                <li><strong>Error Estimation (QBER):** Alice and Bob publicly reveal and compare a random subset of their sifted key bits. The percentage of disagreements is the Quantum Bit Error Rate (QBER). A QBER significantly above the expected channel noise indicates potential eavesdropping.</li>
+                <li><strong>Key Finalization:** If the QBER is below a predefined threshold, they remove the publicly revealed bits. Optional <span class="font-semibold">privacy amplification</span> and <span class="font-semibold">error correction</span> steps (not fully simulated here) can further enhance security and correct minor errors, resulting in the final shared secret key.</li>
+            </ol>
+             <div class="border-2 border-dashed border-gray-300 p-6 text-center text-gray-500 italic mt-4 bg-gray-50 rounded-md">
+                [ Placeholder for BB84 Protocol Diagram/Animation ]
+            </div>
+        </section>
+
+         <!-- Why Banks Need Quantum Security -->
+        <section>
+            <h3 class="text-2xl font-semibold text-indigo-700 mb-3 border-b pb-2">Why is Quantum Security Important for Banking?</h3>
+            <p class="mb-4">
+                The financial sector's reliance on secure digital communication and long-term data integrity makes it particularly sensitive to the quantum threat:
+            </p>
+             <ul class="list-disc space-y-2 pl-6 mb-4">
+                <li><strong>Breaking Current Encryption:** Quantum computers running Shor's algorithm could defeat RSA and ECC, compromising secure online banking, transaction signing, and communication channels.</li>
+                <li><strong>"Harvest Now, Decrypt Later":** Attackers could record encrypted financial data today, intending to decrypt it once powerful quantum computers become available, exposing historical transactions and sensitive information.</li>
+                <li><strong>Maintaining Trust:** Proactively adopting quantum-resistant cryptography (QRC) and technologies like QKD is essential for financial institutions to maintain customer confidence and demonstrate robust security posture in the face of future threats.</li>
+                <li><strong>Securing High-Value Links:** QKD can provide unparalleled security for critical communication links, such as inter-bank transfers or connections to data centers, where the assurance of physics-based security is paramount.</li>
+            </ul>
+             <p>
+                 This simulation uses QKD (BB84) to establish a key, which is then used with AES (a currently quantum-resistant symmetric cipher) to encrypt transaction confirmation details, demonstrating a hybrid approach to quantum safety.
+             </p>
+        </section>
+
+    </div> {# End of text content container #}
+
+    <!-- Navigation back to dashboard -->
+    <div class="mt-12 text-center border-t border-gray-200 pt-8">
+        <a href="{{ url_for('index') }}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-300 text-sm">
+            ← Back to Dashboard
+        </a>
+    </div>
+
+{% endblock %}
