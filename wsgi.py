@@ -22,14 +22,17 @@ if __name__ == "__main__":
     print("--- Running wsgi.py directly (for testing/dev only) ---")
     try:
         from waitress import serve
-        host = os.environ.get('FLASK_RUN_HOST', '127.0.0.1') # Default to localhost
+        # Use environment variables or defaults for host/port when run directly
+        host = os.environ.get('FLASK_RUN_HOST', '127.0.0.1') # Default to localhost for direct run
         port = int(os.environ.get('FLASK_RUN_PORT', 5000)) # Default to 5000
         print(f"Attempting to start server with Waitress on http://{host}:{port}...")
-        print("NOTE: For production, run 'waitress-serve wsgi:app' directly.")
+        print("NOTE: For production, run 'waitress-serve ... wsgi:app' directly.")
         print("Ensure environment variables (DB credentials, SECRET_KEY) are set.")
         serve(app, host=host, port=port)
     except ImportError:
-        print("Waitress not found. Cannot run test server directly.")
-        print("Install Waitress ('pip install waitress') or run app.py instead.")
+        print("\nWARNING: Waitress not found.")
+        print("To run directly with Waitress: pip install waitress")
+        print("Alternatively, run the Flask development server using: python app.py\n")
     except Exception as e:
-        print(f"Error attempting to run Waitress directly: {e}")
+        print(f"\nError attempting to run Waitress directly: {e}")
+        print("You might want to run 'python app.py' instead for development.\n")
