@@ -1,0 +1,6 @@
+venv/ 
+__pycache__/ 
+*.pyc 
+.env 
+database/*.db  # Ignore any leftover SQLite DBs
+database/  # Ignore the database folder itself if empty

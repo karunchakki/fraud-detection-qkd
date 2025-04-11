@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - QKD Secure Bank{% endblock %}
+
+{% block content %}
+    <h2 class="text-3xl font-semibold text-gray-800 mb-6">Account Dashboard</h2>
+
+    <!-- Status Boxes (Only Fraud Alert now) -->
+    <div class="mb-8">
+        <!-- Fraud Alert Box -->
+        {% if show_fraud_alert %}
+            <div class="bg-red-50 border-l-4 border-red-500 text-red-800 p-4 rounded-md shadow-sm" role="alert">
+                <p class="font-bold mb-2">Fraud Alert!</p>
+                <p class="text-sm">One or more recent transactions have been flagged as potentially suspicious.</p>
+                <a href="{{ url_for('fraud_page') }}" class="text-sm font-semibold underline hover:text-red-900 mt-1 inline-block">Review Fraud Report →</a>
+            </div>
+        {% else %}
+             <div class="bg-green-50 border-l-4 border-green-500 text-green-800 p-4 rounded-md shadow-sm">
+                 <p class="font-bold mb-2">Fraud Status</p>
+                 <p class="text-sm">No suspicious activity flagged recently.</p>
+             </div>
+        {% endif %}
+    </div>
+    <!-- End Status Boxes -->
+
+
+    <!-- Display Logged In User's Account Balances -->
+    <div class="mb-8">
+        <h3 class="text-xl font-semibold text-gray-700 mb-3 border-b pb-2">Your Accounts</h3>
+        {% if user_accounts %}
+        <div class="overflow-x-auto rounded-lg shadow border border-gray-200">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account ID</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account Holder</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for acc in user_accounts %}
+                    <tr>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ acc.account_id }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">{{ acc.customer_name }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-700">₹ {{ "%.2f"|format(acc.balance) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-center text-gray-500 my-4">You currently have no accounts.</p>
+        {% endif %}
+    </div>
+
+    <hr class="my-8 border-t border-gray-200">
+
+    <!-- Transaction Input Form -->
+    <h3 class="text-xl font-semibold text-gray-700 mb-5 border-b pb-2">Perform Secure Transfer</h3>
+    {% if user_accounts and receiver_accounts %}
+        <form action="{{ url_for('transfer_funds') }}" method="post" novalidate class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- From Account -->
+                <div>
+                    <label for="sender_account_id" class="block text-sm font-medium text-gray-700 mb-1">From Your Account:</label>
+                    <select id="sender_account_id" name="sender_account_id" required
+                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                        <option value="" disabled selected>Select Account</option>
+                        {% for acc in user_accounts %}
+                        <option value="{{ acc.account_id }}">{{ acc.account_id }} - (Bal: {{ "%.2f"|format(acc.balance) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- To Account -->
+                <div>
+                    <label for="receiver_account_id" class="block text-sm font-medium text-gray-700 mb-1">To Account:</label>
+                     <select id="receiver_account_id" name="receiver_account_id" required
+                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                        <option value="" disabled selected>Select Receiver</option>
+                         {% for acc in receiver_accounts %}
+                        <option value="{{ acc.account_id }}">{{ acc.account_id }} - {{ acc.customer_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                 <!-- Amount -->
+                 <div>
+                    <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">Amount (INR):</label>
+                    <input type="text" id="amount" name="amount" placeholder="e.g., 500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount, e.g., 123.45"
+                           class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                </div>
+            </div>
+
+            <!-- Simulate Eve Checkbox - NOW PART OF TRANSFER FORM -->
+            <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200">
+                <input type="checkbox" id="simulate_eve_transfer" name="simulate_eve" value="true"
+                       class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
+                <label for="simulate_eve_transfer" class="text-sm font-medium text-gray-700">
+                    Simulate Eavesdropper (Eve)?
+                    <span class="text-xs text-gray-500">(Increases QKD errors, may abort transfer)</span>
+                </label>
+            </div>
+
+            <!-- Submit Button - Always Enabled -->
+            <div>
+                <button type="submit" class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                     </svg>
+                    Initiate Secure Transfer
+                </button>
+            </div>
+        </form>
+    {% elif not user_accounts %}
+         <p class="text-center text-gray-500 my-4">You need an account to send funds.</p>
+    {% else %}
+         <p class="text-center text-gray-500 my-4">No other customer accounts available to receive funds. Please <a href="{{ url_for('register_customer') }}" class="text-indigo-600 hover:underline font-medium">register another customer</a>.</p>
+    {% endif %}
+
+    <hr class="my-10 border-t border-gray-200">
+
+    <!-- NEW: Display Result of the Last Transfer Attempt -->
+    {% if last_transfer_outcome %}
+    <div class="mt-6 mb-8">
+         <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Last Transfer Attempt Outcome</h3>
+         <div class="p-4 rounded-md shadow-sm
+            {% if last_transfer_outcome.status == 'Success' %} bg-green-50 border border-green-200
+            {% else %} bg-red-50 border border-red-200 {% endif %}">
+            <p class="text-sm mb-2"><span class="font-semibold">Status:</span>
+                <span class="font-bold {% if last_transfer_outcome.status == 'Success' %}text-green-700{% else %}text-red-700{% endif %}">
+                    {{ last_transfer_outcome.status }}
+                </span>
+            </p>
+            {% if last_transfer_outcome.reason %}
+                 <p class="text-sm mb-2"><span class="font-semibold">Reason:</span> {{ last_transfer_outcome.reason }}</p>
+            {% endif %}
+
+            {# Show QKD specific info if available #}
+            {% if last_transfer_outcome.qber is defined %}
+                 <p class="text-sm mb-2"><span class="font-semibold">QBER:</span>
+                    <span class="font-mono">{{ last_transfer_outcome.qber }}</span>
+                    {% if last_transfer_outcome.qkd_status_msg %}
+                        ({{ last_transfer_outcome.qkd_status_msg }})
+                    {% endif %}
+                 </p>
+            {% endif %}
+
+            {# Show Fraud info if available #}
+            {% if last_transfer_outcome.fraud_check %}
+                <p class="text-sm mb-2"><span class="font-semibold">Fraud Check:</span>
+                    {% if last_transfer_outcome.fraud_check.is_fraudulent %}
+                        <span class="font-bold text-red-600">Flagged!</span> Reason: {{ last_transfer_outcome.fraud_check.reason }}
+                    {% else %}
+                        <span class="text-green-600">Passed</span>
+                    {% endif %}
+                 </p>
+            {% endif %}
+
+            {# Show Log ID if successful #}
+            {% if last_transfer_outcome.log_id %}
+                 <p class="text-sm mb-1"><span class="font-semibold">Log ID:</span> {{ last_transfer_outcome.log_id }}
+                     <a href="{{ url_for('history') }}" class="text-indigo-600 hover:underline text-xs ml-2">(View History)</a>
+                     <a href="{{ url_for('show_report_page', log_id=last_transfer_outcome.log_id) }}" class="text-indigo-600 hover:underline text-xs ml-2">(View PDF Report)</a>
+                 </p>
+            {% endif %}
+
+            <a href="{{ url_for('qkd_page') }}" class="text-xs text-indigo-600 hover:underline font-medium mt-2 inline-block">View Full QKD Log →</a>
+
+         </div>
+    </div>
+    {% endif %}
+    <!-- End Last Transfer Outcome -->
+
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page | default('Page') }} - QSB Portal{% endblock %}
+
+{% block content %}
+    <h1 class="text-2xl font-semibold text-primary-800 mb-4">{{ page | default('Placeholder Page') }}</h1>
+    <p class="text-neutral-600">This page is under construction.</p>
+     <p class="mt-4"><a href="{{ url_for('index') }}" class="text-accent-600 hover:text-accent-500">← Back to Dashboard</a></p>
+{% endblock %}
