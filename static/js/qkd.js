@@ -4,10 +4,10 @@
  * Initializes the QBER history chart using Chart.js.
  * Expects data arrays (labels, QBER values) and threshold value
  * to be injected into global `window` variables by the Flask template (qkd.html).
- * e.g., window.qkdChartLabels, window.qkdChartQberData, window.qkdChartQberThreshold
  */
 document.addEventListener('DOMContentLoaded', function () {
     const canvasElement = document.getElementById('qberChart');
+    const simulationDataExists = typeof window.qkdChartLabels !== 'undefined'; // Basic check if data was injected
 
     if (!canvasElement) {
         // console.log("QBER Chart canvas not found on this page.");
@@ -17,9 +17,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // --- Get Data (Safely access potentially undefined global vars) ---
     const labels = window.qkdChartLabels || ['No Data'];
     const qberData = window.qkdChartQberData || [0];
-    // Default threshold to a reasonable value if not provided
     const qberThreshold = typeof window.qkdChartQberThreshold === 'number'
-        ? window.qkdChartQberThreshold // Expecting percentage value now
+        ? window.qkdChartQberThreshold // Expecting percentage value
         : 15.0; // Default to 15%
 
     // Basic validation
@@ -28,23 +27,24 @@ document.addEventListener('DOMContentLoaded', function () {
         canvasElement.parentElement.innerHTML = '<p class="text-red-500 text-center text-sm p-4">Error: Invalid data for QBER chart.</p>';
         return;
     }
-     if (labels.length === 1 && labels[0] === 'No Data') {
+     if (labels.length === 0 || (labels.length === 1 && labels[0] === 'N/A')) { // Check for empty or default 'N/A'
          console.log("No QBER history data provided for chart.");
-         // Display a message instead of an empty chart
-          canvasElement.parentElement.innerHTML = '<p class="text-gray-500 text-center text-sm p-4">No QBER history data available to display.</p>';
+         canvasElement.parentElement.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center text-sm p-4">No QBER history data available to display.</p>';
          return;
      }
 
-
     // --- Chart Configuration ---
     try {
+        // Ensure thresholdData array matches the length of actual data labels
+        const thresholdData = Array(labels.length).fill(qberThreshold);
+
         new Chart(canvasElement, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [{
-                    label: 'Simulated QBER (%)',
-                    data: qberData, // Should be percentage values
+                    label: 'QBER (%)', // Simplified label
+                    data: qberData,
                     borderColor: 'rgb(59, 130, 246)', // Tailwind blue-500
                     backgroundColor: 'rgba(59, 130, 246, 0.1)',
                     fill: true,
@@ -54,8 +54,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     pointHoverRadius: 5
                  },
                  { // Threshold Line
-                    label: 'QBER Threshold (%)',
-                    data: Array(labels.length).fill(qberThreshold), // Use percentage value
+                    label: 'Threshold (%)', // Simplified label
+                    data: thresholdData,
                     borderColor: 'rgb(239, 68, 68)', // Tailwind red-500
                     borderWidth: 2,
                     borderDash: [6, 6],
@@ -75,13 +75,13 @@ document.addEventListener('DOMContentLoaded', function () {
                         grid: { color: 'rgba(200, 200, 200, 0.1)'} // Lighter grid lines
                     },
                     x: {
-                        title: {display: true, text: 'Simulation Run / Log Entry'},
+                        title: {display: true, text: 'Transaction Log ID'}, // Updated label
                         grid: { display: false } // Hide vertical grid lines
                     }
                 },
                  plugins: {
                      legend: {
-                         position: 'bottom',
+                         position: 'top', // Changed from bottom for potentially better layout
                          labels: { padding: 15 }
                      },
                      tooltip: {
@@ -91,18 +91,32 @@ document.addEventListener('DOMContentLoaded', function () {
                         titleFont: { weight: 'bold' },
                         bodySpacing: 4,
                         padding: 10,
-                        callbacks: { // Custom tooltip labels
+                        // --- UPDATED TOOLTIP CALLBACK ---
+                        callbacks: {
                             label: function(context) {
-                                let label = context.dataset.label || '';
-                                const value = context.parsed.y;
-                                if (label.includes('Threshold')) {
-                                    label = value !== null ? `Threshold: ${value.toFixed(1)}%` : 'Threshold';
-                                } else {
-                                    label = value !== null ? `QBER: ${value.toFixed(2)}%` : 'QBER';
+                                let lineLabel = context.dataset.label || ''; // e.g., 'QBER (%)' or 'Threshold (%)'
+                                const pointLabel = context.label || ''; // e.g., 'Log 123'
+                                const value = context.parsed.y; // The numerical y-value
+
+                                if (value === null || typeof value === 'undefined') {
+                                    return lineLabel; // Don't show value if null/undefined
                                 }
-                                return label;
+
+                                let finalLabel = '';
+                                // Add Log ID prefix for QBER points, but not for the threshold line
+                                if (!lineLabel.includes('Threshold')) {
+                                    finalLabel += `${pointLabel} - `; // Add 'Log XXX - ' prefix
+                                }
+
+                                // Add the specific metric and formatted value
+                                if (lineLabel.includes('Threshold')) {
+                                    finalLabel += `Threshold: ${value.toFixed(1)}%`;
+                                } else {
+                                    finalLabel += `QBER: ${value.toFixed(2)}%`;
+                                }
+                                return finalLabel;
                             }
-                        }
+                        } // --- END UPDATED TOOLTIP CALLBACK ---
                      }
                 }
             }

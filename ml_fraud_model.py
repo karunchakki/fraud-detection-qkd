@@ -9,7 +9,6 @@ import datetime
 from typing import Dict, List, Optional
 
 # --- Configuration ---
-# Assumes model files are in the same directory as this script
 MODEL_DIR = os.path.dirname(__file__)
 MODEL_FILENAME = 'fraud_model.joblib'
 FEATURES_FILENAME = 'fraud_model_features.joblib'
@@ -45,15 +44,11 @@ def load_model() -> bool:
         return True
     except FileNotFoundError as e:
         logging.error(f"ML MODEL LOADING FAILED: {e}. Ensure '{MODEL_FILENAME}' and '{FEATURES_FILENAME}' are in the correct directory relative to the running script.")
-        _fraud_model = None
-        _model_features = None
-        _model_loaded = False
+        _fraud_model = None; _model_features = None; _model_loaded = False
         return False
     except Exception as e:
         logging.error(f"Error loading fraud model: {e}", exc_info=True)
-        _fraud_model = None
-        _model_features = None
-        _model_loaded = False
+        _fraud_model = None; _model_features = None; _model_loaded = False
         return False
 
 def is_ml_model_loaded() -> bool:
@@ -73,6 +68,7 @@ def preprocess_input_features(current_transaction: dict, user_history: list) -> 
         A pandas DataFrame with one row and columns matching _model_features,
         or None if features cannot be calculated or model not loaded.
     """
+    logging.debug(f"Entering preprocess_input_features...")
     if not is_ml_model_loaded():
         logging.error("ML Model not loaded, cannot preprocess features.")
         return None
@@ -80,6 +76,7 @@ def preprocess_input_features(current_transaction: dict, user_history: list) -> 
     try:
         features = {}
         now = current_transaction.get('timestamp', datetime.datetime.now())
+        logging.debug(f"Preprocessing features: Current Tx Amount={current_transaction.get('amount')}, History Count={len(user_history)}")
 
         # --- Feature Engineering (Must MATCH offline training) ---
         features['TransactionAmount'] = float(current_transaction.get('amount', 0.0))
@@ -92,6 +89,7 @@ def preprocess_input_features(current_transaction: dict, user_history: list) -> 
              features['TransactionGap'] = max(0, time_diff_seconds) / (60.0 * 60.0 * 24.0)
         else:
              features['TransactionGap'] = 999.0 # Default gap used in training
+        logging.debug(f"Calculated TransactionGap: {features['TransactionGap']:.4f} days")
 
         # Rolling features (sum/count over last 5 available history points)
         rolling_window = 5
@@ -102,6 +100,7 @@ def preprocess_input_features(current_transaction: dict, user_history: list) -> 
 
         features['sum_5days'] = sum(amounts_in_window)
         features['count_5days'] = len(amounts_in_window)
+        logging.debug(f"Calculated Rolling Features: sum_5days={features['sum_5days']:.2f}, count_5days={features['count_5days']}")
 
         # --- Create DataFrame in correct order ---
         input_data = {}
@@ -111,14 +110,14 @@ def preprocess_input_features(current_transaction: dict, user_history: list) -> 
                 input_data[feature_name] = features[feature_name]
             else:
                 missing_features.append(feature_name)
-                input_data[feature_name] = 0 # Defaulting missing feature
+                input_data[feature_name] = 0 # Defaulting missing feature to 0
 
         if missing_features:
              logging.error(f"CRITICAL: Features missing during preprocessing: {missing_features}. Check alignment with training features: {_model_features}")
              return None
 
         df_input = pd.DataFrame([input_data], columns=_model_features)
-        logging.debug(f"Preprocessed features for prediction:\n{df_input.to_string()}")
+        logging.debug(f"Returning preprocessed DataFrame:\n{df_input.to_string()}")
         return df_input
 
     except Exception as e:
@@ -136,21 +135,24 @@ def predict_fraud_proba(input_df: pd.DataFrame) -> float:
         The probability of the transaction being fraudulent (float between 0 and 1),
         or -1.0 if prediction fails or model not loaded.
     """
+    logging.debug("Entering predict_fraud_proba...")
     if not is_ml_model_loaded():
         logging.error("ML Model not loaded, cannot make prediction.")
-        return -1.0 # Indicate error
+        return -1.0
 
     if input_df is None or input_df.empty:
          logging.error("Invalid input DataFrame provided for prediction.")
          return -1.0
 
     try:
+        logging.debug(f"Predicting fraud probability for input:\n{input_df.to_string()}")
         # Ensure input_df has the exact columns in the exact order expected by the model
         input_df_ordered = input_df[_model_features]
 
         probabilities = _fraud_model.predict_proba(input_df_ordered)
         if probabilities.shape == (1, 2):
             fraud_probability = probabilities[0, 1] # Probability of class 1 (fraud)
+            logging.debug(f"Predicted fraud probability: {fraud_probability:.4f}")
             return float(fraud_probability)
         else:
             logging.error(f"Unexpected probability shape from model: {probabilities.shape}")
@@ -160,4 +162,4 @@ def predict_fraud_proba(input_df: pd.DataFrame) -> float:
          return -1.0
     except Exception as e:
         logging.error(f"Error during model prediction: {e}", exc_info=True)
-        return -1.0 # Indicate error
+        return -1.0

@@ -1,7 +1,3 @@
-# train_fraud_model.py
-# Script to preprocess data, train fraud detection model (with synthetic labels),
-# and save the model and feature list for the Flask app.
-
 import os
 import logging
 import traceback
@@ -13,109 +9,103 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
 import joblib
 
-print("--- Starting Fraud Model Training Script ---")
+# --- Logging Setup ---
+print("--- Starting Fraud Detection Model Training ---")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # --- Configuration ---
 CSV_PATH = 'bank_transactions_data_2.csv'
-MODEL_FILENAME = 'fraud_model.joblib'
-FEATURES_FILENAME = 'fraud_model_features.joblib'
+MODEL_FILE = 'fraud_model.joblib'
+FEATURES_FILE = 'fraud_model_features.joblib'
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_FULL_PATH = os.path.join(SCRIPT_DIR, CSV_PATH)
-MODEL_FULL_PATH = os.path.join(SCRIPT_DIR, MODEL_FILENAME)
-FEATURES_FULL_PATH = os.path.join(SCRIPT_DIR, FEATURES_FILENAME)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_FULL_PATH = os.path.join(BASE_DIR, CSV_PATH)
+MODEL_FULL_PATH = os.path.join(BASE_DIR, MODEL_FILE)
+FEATURES_FULL_PATH = os.path.join(BASE_DIR, FEATURES_FILE)
 
 # --- Load Data ---
 try:
-    logging.info(f"Loading data from: {CSV_FULL_PATH}")
+    logging.info(f"Loading data from {CSV_FULL_PATH}")
     df = pd.read_csv(CSV_FULL_PATH)
-    logging.info(f"Data loaded successfully. Shape: {df.shape}")
+    logging.info(f"Data shape: {df.shape}")
 except FileNotFoundError:
-    logging.error(f"Cannot find the data file at '{CSV_FULL_PATH}'.")
+    logging.error("CSV file not found.")
     exit()
 except Exception as e:
-    logging.error(f"Failed to load data: {e}")
+    logging.error("Failed to read CSV file.")
     traceback.print_exc()
     exit()
 
-# --- Preprocessing and Feature Engineering ---
+# --- Preprocessing ---
 try:
-    logging.info("Preprocessing data and engineering features...")
+    logging.info("Starting preprocessing and feature engineering...")
 
-    # Convert to datetime
     df['TransactionDate'] = pd.to_datetime(df['TransactionDate'], errors='coerce')
     df['PreviousTransactionDate'] = pd.to_datetime(df['PreviousTransactionDate'], errors='coerce')
-
-    # Drop rows with invalid dates
     df.dropna(subset=['TransactionDate'], inplace=True)
+
     df.sort_values(by=['AccountID', 'TransactionDate'], inplace=True)
     df.reset_index(drop=True, inplace=True)
 
-    # Calculate transaction gap in days
     df['TransactionGap'] = (df['TransactionDate'] - df['PreviousTransactionDate']).dt.total_seconds() / (60 * 60 * 24)
-    df['TransactionGap'] = df['TransactionGap'].fillna(999.0).clip(lower=0)
-
-    # Extract hour
+    df['TransactionGap'] = df['TransactionGap'].fillna(999).clip(lower=0)
     df['TransactionHour'] = df['TransactionDate'].dt.hour
 
-    # Rolling features
-    window_size = 5
-    df['sum_5days'] = df.groupby('AccountID')['TransactionAmount']\
-        .transform(lambda x: x.rolling(window=window_size, min_periods=1).sum().shift(1)).fillna(0)
-    df['count_5days'] = df.groupby('AccountID')['TransactionAmount']\
-        .transform(lambda x: x.rolling(window=window_size, min_periods=1).count().shift(1)).fillna(0)
+    window = 5
+    df['sum_5days'] = df.groupby('AccountID')['TransactionAmount'].transform(lambda x: x.rolling(window, min_periods=1).sum().shift(1)).fillna(0)
+    df['count_5days'] = df.groupby('AccountID')['TransactionAmount'].transform(lambda x: x.rolling(window, min_periods=1).count().shift(1)).fillna(0)
 
-    logging.info("Preprocessing complete.")
-    logging.info("Sample:\n%s", df[['TransactionAmount', 'TransactionHour', 'TransactionGap', 'sum_5days', 'count_5days']].head().to_string())
+    logging.info("Feature engineering complete.")
 except Exception as e:
-    logging.error(f"Error in preprocessing: {e}")
+    logging.error("Error during preprocessing.")
     traceback.print_exc()
     exit()
 
-# --- Generate Synthetic Labels ---
-logging.warning("Generating SYNTHETIC fraud labels (2% fraud rate).")
-np.random.seed(42)
-df['is_fraud'] = np.random.choice([0, 1], size=len(df), p=[0.98, 0.02])
-fraud_count = df['is_fraud'].sum()
-logging.info(f"Synthetic fraud labels created. Fraud count: {fraud_count} ({(fraud_count / len(df)) * 100:.2f}%)")
+# --- Synthetic Fraud Labeling ---
+logging.info("Generating synthetic fraud labels...")
 
-# --- Feature Selection ---
-feature_names = ['TransactionAmount', 'count_5days', 'sum_5days', 'TransactionHour', 'TransactionGap']
-X = df[feature_names]
+df['is_fraud'] = 0
+amount_thresh = df['TransactionAmount'].quantile(0.995)
+gap_thresh_days = 15 / (24 * 60 * 60)
+count_thresh = 4
+hour_range = (1, 5)
+
+rule1 = df[df['TransactionAmount'] > amount_thresh].index
+df.loc[rule1, 'is_fraud'] = 1
+
+rule2 = df[(df['TransactionGap'] < gap_thresh_days) & (df['count_5days'] >= count_thresh)].index.difference(rule1)
+df.loc[rule2, 'is_fraud'] = 1
+
+rule3 = df[(df['TransactionHour'] >= hour_range[0]) & (df['TransactionHour'] <= hour_range[1])].index.difference(rule1).difference(rule2)
+df.loc[rule3, 'is_fraud'] = 1
+
+logging.info(f"Rule-based fraud labeling complete. Total frauds: {df['is_fraud'].sum()}")
+
+# --- Model Training ---
+features = ['TransactionAmount', 'count_5days', 'sum_5days', 'TransactionHour', 'TransactionGap']
+X = df[features].fillna(0)
 y = df['is_fraud'].astype(int)
 
-if X.isnull().values.any():
-    logging.warning("Missing values found in features. Filling with 0.")
-    X = X.fillna(0)
-
-# --- Train-Test Split ---
 try:
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42, stratify=y)
-    logging.info(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, stratify=y, random_state=42)
+    logging.info(f"Train/Test split: {X_train.shape}, {X_test.shape}")
 except ValueError as e:
-    logging.error(f"Train-test split error: {e}")
+    logging.error("Train-test split failed.")
     exit()
 
-# --- Train Model ---
-model = RandomForestClassifier(
-    n_estimators=100, random_state=42, class_weight='balanced', n_jobs=-1)
-
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced', n_jobs=-1)
 model.fit(X_train, y_train)
-logging.info("Model training complete.")
+logging.info("Model training completed.")
 
 # --- Evaluation ---
 y_pred = model.predict(X_test)
-report = classification_report(y_test, y_pred, target_names=['Normal (0)', 'Fraud (1)'], digits=4)
-print("\nModel Evaluation Report:\n")
-print(report)
+print("\nClassification Report:\n")
+print(classification_report(y_test, y_pred, target_names=['Normal (0)', 'Fraud (1)'], digits=4))
 
-# --- Save Model and Features ---
+# --- Save Model ---
 joblib.dump(model, MODEL_FULL_PATH)
-joblib.dump(feature_names, FEATURES_FULL_PATH)
-
-print("\n--- Model Training Script Finished Successfully ---")
-print(f"Saved model to: {MODEL_FULL_PATH}")
-print(f"Saved feature list to: {FEATURES_FULL_PATH}")
-print("NOTE: Model was trained on synthetic labels and should not be used for real fraud detection.")
+joblib.dump(features, FEATURES_FULL_PATH)
+print("\n--- Training Complete ---")
+print(f"Model saved to: {MODEL_FULL_PATH}")
+print(f"Feature list saved to: {FEATURES_FULL_PATH}")
+print("Note: This model is trained on synthetic data.")
