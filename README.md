@@ -1,6 +1,5 @@
 # QKD Secure Banking Demo
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 This project demonstrates the integration of Quantum Key Distribution (QKD) concepts (specifically a BB84 simulation using Qiskit) and Machine Learning (for fraud detection) into a Flask-based web application simulating a secure banking portal.
 
