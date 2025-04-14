@@ -1,165 +1,155 @@
-# QKD Secure Banking Demo
+QKD Secure Banking Simulation
+    This project simulates the integration of Quantum Key Distribution (QKD) using the BB84 protocol and Machine Learning (ML) for fraud detection within a Flask-based secure banking web application.
+    
+    It explores how quantum principles can secure key exchanges in banking, while classical ML models identify suspicious financial behavior.
+    
+    Note: This is an educational simulation. QKD is simulated using Qiskit, and the ML model may be trained on synthetic data. The app is not secure for real-world banking and lacks production-level security features.
 
+🔐 Key Features
+    User Authentication: Registration, login, hashed passwords, and password recovery.
+    
+    Database Integration: MySQL for storing user data, account details, and transactions.
+    
+    BB84 QKD Simulation: Simulated quantum key exchange using Qiskit; checks QBER to detect eavesdropping.
+    
+    Secure Transactions: AES encryption using keys derived from successful QKD.
+    
+    Fraud Detection: Random Forest Classifier flags suspicious transactions.
+    
+    PDF Reporting: Auto-generates reports for QKD events and transactions.
+    
+    Modern UI: Built using Flask, Tailwind CSS, and Jinja2 templates.
+    
+    Risk Simulation (Basic): Placeholder tools for risk analysis and CVaR calculations.
+    
+    Deployment-Ready: Includes wsgi.py for Gunicorn or Waitress deployment.
 
-This project demonstrates the integration of Quantum Key Distribution (QKD) concepts (specifically a BB84 simulation using Qiskit) and Machine Learning (for fraud detection) into a Flask-based web application simulating a secure banking portal.
-
-It showcases how QKD could provide physics-based security for key exchange during financial transactions and how ML can add another layer of classical security.
-
-**Disclaimer:** This is a simulation for educational and demonstration purposes only. The QKD is simulated, the ML model uses synthetic data (unless trained on real data), and the application lacks many security features of a production banking system.  
-**Do NOT use this for real financial transactions.**
-
-## 🔐 Core Features
-
-- **User Authentication:** Secure registration, login, password hashing, forgot/reset password.
-- **Database:** MySQL-backed, stores user, account, and transaction data.
-- **QKD Simulation (BB84):** Simulates BB84 protocol with Qiskit; detects eavesdropping via QBER.
-- **Secure Transactions:** Uses AES keys (via Fernet) from successful QKD runs for logging.
-- **Fraud Detection (ML):** Detects suspicious activity using a trained `RandomForestClassifier`.
-- **PDF Reporting:** Auto-generates reports for QKD and transaction events.
-- **User Interface:** Built with Flask, Jinja2, Tailwind CSS.
-- **Risk Simulation:** Placeholder analysis for portfolio optimization and CVaR risk metrics.
-- **Production Ready:** `wsgi.py` included for deployment using Gunicorn or Waitress.
+🗂 Folder Structure
+    /
+    ├── .env                       # Environment variables (secret key, DB credentials)
+    ├── .env.example              # Example .env file
+    ├── .gitignore                # Git ignore rules
+    ├── app.py                    # Main Flask application
+    ├── fraud_detection.py        # Fraud detection orchestration
+    ├── ml_fraud_model.py         # Loads ML model & features, makes predictions
+    ├── pdf_generator.py          # Generates PDF reports
+    ├── qkd_simulation.py         # Simulates BB84 QKD
+    ├── requirements.txt          # Python dependencies
+    ├── risk_simulation.py        # Placeholder financial risk analysis
+    ├── schema.sql                # MySQL schema setup
+    ├── train_fraud_model.py      # ML model training script
+    ├── wsgi.py                   # WSGI server entry point
+    ├── fraud_model.joblib        # Trained fraud detection model
+    ├── fraud_model_features.joblib # ML feature list
+    │
+    ├── static/
+    │   ├── css/styles.css        # Custom styles
+    │   └── js/
+    │       ├── qkd.js            # Charts for QKD page
+    │       └── script.js         # Global JS (UI toggles, etc.)
+    │
+    └── templates/
+        ├── base.html             # Main layout
+        ├── index.html            # Dashboard
+        ├── login.html            # Login form
+        ├── register.html         # Registration form
+        ├── forgot_password.html  # Password recovery
+        ├── reset_password.html   # Password reset
+        ├── history.html          # Transaction history
+        ├── fraud.html            # Fraud report page
+        ├── qkd.html              # QKD simulation details
+        ├── quantum_impact.html   # Info page
+        ├── about.html            # About page
+        ├── report.html           # PDF download confirmation
+        ├── risk_analysis.html    # Risk analysis results
+        └── partials/_flashes.html # Flash messages
 
 ---
 
-## 🗂 Project Structure
-
-├── .env                  # <-- YOU create and fill this (DO NOT COMMIT)
-├── .env.example          # <-- Contains variable placeholders
-├── .gitignore            # <-- Specifies files/folders for Git to ignore
-│
-├── app.py                # <-- FINAL VERSION provided
-├── fraud_detection.py    # <-- FINAL VERSION provided (Uses ML model)
-├── ml_fraud_model.py     # <-- FINAL VERSION provided (Loads model, preprocesses, predicts)
-├── pdf_generator.py      # <-- FINAL VERSION provided (Generates Transaction PDF)
-├── qkd_simulation.py     # <-- FINAL VERSION provided (Includes BB84 Sim + QKD Sim PDF generation)
-├── requirements.txt      # <-- FINAL VERSION provided (Cleaned up dependencies)
-├── risk_simulation.py    # <-- FINAL VERSION provided (Placeholder for risk analysis)
-├── schema.sql            # <-- FINAL VERSION provided (Database schema)
-├── train_fraud_model.py  # <-- FINAL VERSION provided (Offline ML training script)
-├── wsgi.py               # <-- FINAL VERSION provided (WSGI entry point)
-│
-├── fraud_model.joblib    # <-- Generated by running train_fraud_model.py
-├── fraud_model_features.joblib # <-- Generated by running train_fraud_model.py
-│
-├── static/               # <-- Folder for static files
-│   ├── css/
-│   │   └── styles.css    # <-- FINAL VERSION provided (Basic placeholder)
-│   └── js/
-│       ├── qkd.js        # <-- FINAL VERSION provided (Initializes QKD chart)
-│       └── script.js     # <-- FINAL VERSION provided (Basic menu/footer JS)
-│
-└── templates/            # <-- Folder for HTML templates
-    ├── base.html         # <-- FINAL VERSION provided (Tailwind base layout)
-    ├── index.html        # <-- FINAL VERSION provided (Dashboard)
-    ├── login.html        # <-- FINAL VERSION provided (Login form)
-    ├── register.html     # <-- FINAL VERSION provided (Registration form)
-    ├── forgot_password.html # <-- FINAL VERSION provided
-    ├── reset_password.html  # <-- FINAL VERSION provided
-    ├── history.html      # <-- FINAL VERSION provided (Transaction history)
-    ├── qkd.html          # <-- FINAL VERSION provided (QKD sim details + chart)
-    ├── fraud.html        # <-- FINAL VERSION provided (Flagged transactions)
-    ├── quantum_impact.html # <-- FINAL VERSION provided (Info page)
-    ├── about.html        # <-- FINAL VERSION provided (Info page)
-    ├── report.html       # <-- FINAL VERSION provided (Txn PDF download confirmation)
-    ├── risk_analysis.html  # <-- FINAL VERSION provided (Risk analysis results)
-    │
-    └── partials/         # <-- Folder for template snippets
-        └── _flashes.html # <-- FINAL VERSION provided (Renders flash messages)
-
-
-## 🛠 Setup Instructions
+## 🛠️ Setup Guide
 
 ### 1. Prerequisites
 
-- Python 3.9+
-- MySQL Server
-- Git
-- (Optional) `bank_transactions_data_2.csv` for ML training
-
----
+    - **Python 3.9+**
+    - **MySQL Server** (with admin access)
+    - **Git**
+    - *(Optional)*: `bank_transactions_data_2.csv` — required to retrain ML model.
 
 ### 2. Clone the Repository
 
-```bash
-git clone https://github.com/karunchakki/fraud-detection-qkd.git
-cd fraud-detection-qkd
+    ```bash
+    git clone https://github.com/karunchakki/fraud-detection-qkd.git
+    cd fraud-detection-qkd
 
-3. 🧪 Create Virtual Environment
+3. Set Up a Virtual Environment
 
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# macOS/Linux
-source venv/bin/activate
+    # Create
+    python -m venv venv
+    
+    # Activate
+    # Windows:
+    venv\Scripts\activate
+    
+    # macOS/Linux:
+    source venv/bin/activate
 
-4. 📥 Install Dependencies
+4. Install Dependencies
+    
+    pip install -r requirements.txt
 
-pip install -r requirements.txt
+5. Configure MySQL
+    Log in to MySQL as root and run:
+    
+    CREATE DATABASE IF NOT EXISTS qkd_bank_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    
+    CREATE USER 'qkd_app_user'@'localhost' IDENTIFIED BY 'your_secure_password';
+    
+    GRANT ALL PRIVILEGES ON qkd_bank_db.* TO 'qkd_app_user'@'localhost';
+    FLUSH PRIVILEGES;
+    
+    Then, from your terminal:
+    
+    mysql -u qkd_app_user -p qkd_bank_db < schema.sql
 
-5. 🛢️ MySQL Database Setup
+6. Setup Environment Variables
+    # Windows:
+    copy .env.example .env
+    
+    # macOS/Linux:
+    cp .env.example .env
 
--- Log into MySQL:
-CREATE DATABASE qkd_bank_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    Then edit .env and set:
 
-CREATE USER 'qkd_app_user'@'localhost' IDENTIFIED BY 'your_secure_password';
-GRANT ALL PRIVILEGES ON qkd_bank_db.* TO 'qkd_app_user'@'localhost';
-FLUSH PRIVILEGES;
-
-Then load the schema:
-mysql -u qkd_app_user -p qkd_bank_db < schema.sql
-
-6. 🛠️ Configure Environment Variables
-# Copy the example
-cp .env.example .env
-
-  Edit .env and set:
-    FLASK_SECRET_KEY → Run: python -c "import secrets; print(secrets.token_hex(24))"
+    FLASK_SECRET_KEY= (generate via python -c "import secrets; print(secrets.token_hex(24))")  
     MYSQL_USER=qkd_app_user
     MYSQL_PASSWORD=your_secure_password
     MYSQL_DB=qkd_bank_db
+    Adjust QBER_THRESHOLD or FRAUD_BLACKLIST if needed.
 
-7. 🤖 Train ML Fraud Model (Optional)
-  Requires bank_transactions_data_2.csv in the project root.
-  python train_fraud_model.py
+7. Train the ML Model
+   python train_fraud_model.py
 
-8. 🚀 Run the Application
-waitress-serve --host=0.0.0.0 --port=5001 wsgi:app
-Open browser: http://127.0.0.1:5001
+8. Run the App
+   Using Waitress (Recommended):
+    waitress-serve --host=0.0.0.0 --port=5001 wsgi:app
+
+Access in browser: http://127.0.0.1:5001
 
 💡 Usage Tips
-Register multiple users to test transfers.
+    Register multiple users to simulate transfers.
+    Enable "Simulate Eavesdropper" during transfer to test QKD failure due to high QBER.
+    Monitor terminal logs for QKD and ML decision details.
+    Explore all pages: QKD, Risk Analysis, History, Fraud Report, etc.
+    PDF downloads are available post-transfer and QKD sim.
 
-Check “Simulate Eavesdropper” to see QKD failure in action.
+🧱 Tech Stack
+    Backend: Python, Flask
+    Frontend: HTML, Tailwind CSS (via CDN), Jinja2
+    Database: MySQL
+    Quantum Simulation: Qiskit (BB84 protocol)
+    ML & Data: Scikit-learn, Joblib, Pandas, NumPy
+    PDFs: ReportLab
+    Forms: Flask-WTF, WTForms
+    Encryption: Fernet (AES), Werkzeug
+    Server: Waitress (for production)
 
-See /history, /fraud, /qkd, and /risk-analysis for various reports.
-
-Review PDF downloads for confirmation logs and QKD summary.
-
-Note: Fraud detection uses synthetic labels — this is only for demo purposes.
-
-🧰 Technology Stack
-Backend: Python, Flask
-
-Frontend: HTML, Jinja2, Tailwind CSS, JS (Chart.js)
-
-Database: MySQL
-
-QKD Simulation: Qiskit Aer
-
-ML: Scikit-learn, Pandas, Joblib
-
-PDF Reports: ReportLab
-
-Auth: Werkzeug, ItsDangerous
-
-Deployment: Waitress/Gunicorn
-
-⚠️ Limitations
-Simulated QKD — no real quantum hardware.
-
-Fraud detection based on synthetic data.
-
-No OTP/2FA/HTTPS implemented.
-
-Meant for research and academic demonstration only.
