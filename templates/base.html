@@ -41,29 +41,21 @@
     </script>
 
     {# ---- Custom Stylesheet ---- #}
-    {# Styles for #particles-js can now be removed from this file #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
     {# ---- Page-Specific Head Elements ---- #}
     {% block head_extra %}{% endblock %}
 
 </head>
-{# Added default background color here as it was removed from html tag #}
 <body class="h-full font-sans leading-normal tracking-normal flex flex-col text-neutral-800 bg-neutral-100">
 
-    {# --- PARTICLES CONTAINER REMOVED --- #}
-    {# <div id="particles-js"></div> #}
-
     <!-- Header Navigation -->
-    {# Nav should still function correctly #}
     <nav class="bg-primary-800 shadow-md sticky top-0 z-50 border-b border-primary-700">
-       {# ... (nav content remains the same) ... #}
        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <!-- Logo/Brand -->
                 <div class="flex-shrink-0">
                     <a href="{{ url_for('index') }}" class="text-white hover:text-accent-300 transition-colors duration-200 ease-in-out text-xl font-bold flex items-center">
-                        {# Placeholder Logo - Replace #}
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mr-2 inline-block text-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 21v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m0 0h4.5V3.545M12.75 21h7.5V10.75M2.25 21h1.5m18 0h-18M2.25 9l4.5-1.636M18.75 3l-1.5.545m0 6.205l3 1m1.5.5l-1.5-.5M6.75 7.364l-1.5 .545m0 0l-3-1m-1.5-.5l1.5.5m7.5-3l-4.5-1.636M6.75 7.364l6-2.182m0 0l6 2.182M12 12.75a4.5 4.5 0 110-9 4.5 4.5 0 010 9z" />
                         </svg>
@@ -73,17 +65,19 @@
 
                 <!-- Navigation Links (Desktop) -->
                 <div class="hidden md:block">
-                   {# ... (desktop nav links remain the same) ... #}
                    <div class="ml-10 flex items-center space-x-4">
                         {% if session_user %}
                             <a href="{{ url_for('index') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'index' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Dashboard</a>
                             <a href="{{ url_for('history') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'history' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">History</a>
                             <a href="{{ url_for('qkd_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'qkd_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">QKD Sim</a>
                             <a href="{{ url_for('fraud_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'fraud_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Fraud Report</a>
+                            {# *** ADDED RISK ANALYSIS LINK HERE *** #}
+                            <a href="{{ url_for('risk_analysis_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'risk_analysis_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Risk Analysis</a>
+                            {# *** END ADDED LINK *** #}
                             <a href="{{ url_for('quantum_impact') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'quantum_impact' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Quantum Impact</a>
                             <a href="{{ url_for('about') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'about' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">About</a>
                             <div class="flex items-center pl-4 ml-4 border-l border-primary-700 space-x-4">
-                                <span class="text-neutral-300 text-sm font-medium" title="Logged in as {{ session_user.email }}">Welcome, {{ session_user.name }}!</span>
+                                <span class="text-neutral-300 text-sm font-medium" title="Logged in as {{ session_user.email }}">{{ session_user.name }}</span>
                                 <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Logout</a>
                             </div>
                         {% else %}
@@ -97,7 +91,6 @@
 
                 <!-- Mobile Menu Button -->
                 <div class="-mr-2 flex md:hidden">
-                   {# ... (mobile menu button remains the same) ... #}
                    <button type="button" id="mobile-menu-button" class="bg-primary-800 inline-flex items-center justify-center p-2 rounded-md text-neutral-400 hover:text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-primary-800 focus:ring-white" aria-controls="mobile-menu" aria-expanded="false">
                         <span class="sr-only">Open main menu</span>
                         <svg id="menu-icon-open" class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -109,18 +102,20 @@
 
         <!-- Mobile menu -->
         <div class="md:hidden hidden" id="mobile-menu">
-           {# ... (mobile menu content remains the same) ... #}
             <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
                 {% if session_user %}
                     <a href="{{ url_for('index') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'index' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Dashboard</a>
                     <a href="{{ url_for('history') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'history' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">History</a>
                     <a href="{{ url_for('qkd_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'qkd_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">QKD Sim</a>
                     <a href="{{ url_for('fraud_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'fraud_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Fraud Report</a>
+                     {# *** ADDED RISK ANALYSIS LINK HERE *** #}
+                    <a href="{{ url_for('risk_analysis_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'risk_analysis_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Risk Analysis</a>
+                    {# *** END ADDED LINK *** #}
                     <a href="{{ url_for('quantum_impact') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'quantum_impact' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Quantum Impact</a>
                     <a href="{{ url_for('about') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'about' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">About</a>
                     <div class="pt-4 pb-3 border-t border-primary-700">
                         <div class="flex items-center px-5">
-                            <div class="ml-3">
+                            <div class="ml-0">
                                 <div class="text-base font-medium leading-none text-white">{{ session_user.name }}</div>
                                 <div class="text-sm font-medium leading-none text-neutral-400 mt-1">{{ session_user.email }}</div>
                             </div>
@@ -140,48 +135,16 @@
     </nav>
 
     <!-- Main Content Area -->
-    {# Outer main controls overall padding (py-10) and vertical growth #}
     <main class="flex-grow w-full py-10">
-        {# Centered container with max-width and horizontal padding #}
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {# *** ADDED: Inner container with white background, padding, rounded corners, and shadow *** #}
-            <div class="bg-white p-6 sm:p-8 md:p-10 rounded-lg shadow-xl">
+            <div class="bg-white p-6 sm:p-8 md:p-10 rounded-lg shadow-xl border border-neutral-200">
 
                 <!-- Flash Messages Area -->
-                {# Flash messages now appear inside the white container #}
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="mb-6 space-y-4">
-                        {% for category, message in messages %}
-                             {% set base_style = 'p-4 border-l-4 rounded-md shadow-md bg-opacity-95 flex items-start space-x-3' %}
-                             {% if category == 'success' %}
-                                 <div class="{{ base_style }} border-green-500 bg-green-100 text-green-900" role="alert">
-                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                     <p class="font-medium">{{ message }}</p>
-                                 </div>
-                             {% elif category == 'error' %}
-                                  <div class="{{ base_style }} border-red-500 bg-red-100 text-red-900" role="alert">
-                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                     <p class="font-medium">{{ message }}</p>
-                                 </div>
-                             {% elif category == 'warning' %}
-                                  <div class="{{ base_style }} border-yellow-500 bg-yellow-100 text-yellow-900" role="alert">
-                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-yellow-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                                     <p class="font-medium">{{ message }}</p>
-                                  </div>
-                             {% else %} {# Default/Info #}
-                                  <div class="{{ base_style }} border-blue-500 bg-blue-100 text-blue-900" role="alert">
-                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                     <p class="font-medium">{{ message }}</p>
-                                 </div>
-                             {% endif %}
-                        {% endfor %}
-                        </div>
-                    {% endif %}
-                {% endwith %}
+                {% block flashes %}
+                    {% include 'partials/_flashes.html' %}
+                {% endblock flashes %}
 
                 <!-- Main content block overridden by child templates -->
-                {# This content will now appear on the white background #}
                 {% block content %}{% endblock %}
 
             </div> {# End of inner white content container #}
@@ -189,9 +152,7 @@
     </main>
 
     <!-- Footer -->
-    {# Footer remains dark #}
     <footer class="bg-primary-800 border-t border-primary-700 text-neutral-400 py-5 mt-auto">
-        {# ... (footer content remains the same) ... #}
          <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm">
             <div class="mb-2 space-x-4">
                 <a href="#" class="hover:text-accent-300 transition-colors duration-150">Privacy Policy</a>
@@ -205,18 +166,21 @@
                  <br class="sm:hidden">
                  For Educational & Demonstration Purposes Only.
             </p>
+             {# Add constants display to footer if desired #}
+             <p class="text-xs text-neutral-500 mt-2">
+                 QBER Threshold: {{ QBER_THRESHOLD | default('N/A') }} |
+                 Initial Balance: ₹{{ "%.2f"|format(INITIAL_BALANCE | default(0.00)) }}
+             </p>
         </div>
     </footer>
 
     <!-- Core/Global JavaScript -->
-    {# ... (JS remains the same, including removing particle scripts) ... #}
      <script>
         // Set current year in footer
         const yearSpan = document.getElementById('current-year');
         if (yearSpan) yearSpan.textContent = new Date().getFullYear();
 
         // Mobile menu toggle functionality
-        // ... (keep existing mobile menu JS) ...
         const menuButton = document.getElementById('mobile-menu-button');
         const mobileMenu = document.getElementById('mobile-menu');
         const openIcon = document.getElementById('menu-icon-open');

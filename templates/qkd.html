@@ -7,63 +7,63 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
-{# Remove the old head_style block #}
-
 {% block content %}
-    <h2 class="text-3xl font-semibold text-gray-800 mb-8 text-center">BB84 QKD Protocol Simulation Details</h2>
+    <h2 class="text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-8 text-center">BB84 QKD Protocol Simulation Details</h2>
 
     <!-- Simulation Output Display -->
     {% if simulation_log %} {# Check if results from the last run exist in the session #}
         <div class="space-y-8">
 
             {# Summary Box #}
-            <div class="bg-gray-50 p-6 rounded-lg border border-gray-200 shadow-sm">
-                <h3 class="text-lg font-semibold text-gray-700 mb-3">Run Summary</h3>
+            <div class="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">Run Summary</h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div><span class="font-medium text-gray-600">Initial Qubits:</span> {{ simulation_log.initial_qubits }}</div>
-                    <div><span class="font-medium text-gray-600">Sifted Bits:</span> {{ simulation_log.sifted_indices_count }}</div>
-                    <div><span class="font-medium text-gray-600">QBER Samples:</span> {{ simulation_log.qber_sample_count }}</div>
-                    <div><span class="font-medium text-gray-600">Final Key Length:</span> {{ simulation_log.final_key_length }}</div>
-                    <div class="col-span-2 md:col-span-1"><span class="font-medium text-gray-600">Eve Simulated?:</span>
-                        <span class="{{ 'text-red-600 font-semibold' if simulation_log.eve_simulated else 'text-green-600' }}">
+                    <div><span class="font-medium text-gray-600 dark:text-gray-400">Initial Qubits:</span> <span class="dark:text-gray-200">{{ simulation_log.initial_qubits }}</span></div>
+                    <div><span class="font-medium text-gray-600 dark:text-gray-400">Sifted Bits:</span> <span class="dark:text-gray-200">{{ simulation_log.sifted_indices_count }}</span></div>
+                    <div><span class="font-medium text-gray-600 dark:text-gray-400">QBER Samples:</span> <span class="dark:text-gray-200">{{ simulation_log.qber_sample_count }}</span></div>
+                    <div><span class="font-medium text-gray-600 dark:text-gray-400">Final Key Length:</span> <span class="dark:text-gray-200">{{ simulation_log.final_key_length }}</span></div>
+                    <div class="col-span-2 md:col-span-1"><span class="font-medium text-gray-600 dark:text-gray-400">Eve Simulated?:</span>
+                        <span class="{{ 'text-red-500 font-semibold' if simulation_log.eve_simulated else 'text-green-500' }}">
                             {{ 'Yes' if simulation_log.eve_simulated else 'No' }}
                         </span>
                     </div>
-                     <div class="col-span-2 md:col-span-3"><span class="font-medium text-gray-600">QBER:</span>
-                        <span class="font-mono font-semibold {{ 'text-red-600' if simulation_log.qber > QBER_THRESHOLD else ('text-green-600' if simulation_log.qber >= 0 else 'text-gray-500') }}">
-                            {{ "%.4f" | format(simulation_log.qber) if simulation_log.qber >= 0 else 'Calc Failed' }}
+                     <div class="col-span-2 md:col-span-3"><span class="font-medium text-gray-600 dark:text-gray-400">QBER:</span>
+                        {# Display formatted QBER or specific error messages #}
+                        <span class="font-mono font-semibold {{ 'text-red-500' if simulation_log.qber > QBER_THRESHOLD else ('text-green-500' if simulation_log.qber >= 0 else 'text-gray-500') }}">
+                            {{ "%.4f" | format(simulation_log.qber) if simulation_log.qber >= 0 else ('N/A' if simulation_log.qber == -1.0 else ('Low Bits' if simulation_log.qber == -2.0 else 'Sim Err')) }}
                         </span>
-                        (<span class="font-semibold {{ 'text-red-600' if simulation_log.eve_detected else 'text-green-600' }}">
-                            {{ 'EVE DETECTED!' if simulation_log.eve_detected else 'Threshold OK' }}
+                        {# Display Eve detection status based on flag or QBER status #}
+                        (<span class="font-semibold {{ 'text-red-500' if simulation_log.eve_detected else 'text-green-500' }}">
+                            {{ 'EVE DETECTED!' if simulation_log.eve_detected else ('Threshold OK' if simulation_log.qber >= 0 else 'Status N/A') }}
                         </span>)
                     </div>
                 </div>
             </div>
 
-            <hr class="border-gray-200">
+            <hr class="border-gray-200 dark:border-gray-700">
 
             {# Initial State & Measurement Choices #}
             <div>
-                <h4 class="text-xl font-semibold text-gray-700 mb-4">1. Initial State & Measurement Choices</h4>
-                 <p class="text-sm text-gray-600 mb-3">(Showing first {{ simulation_log.alice_bits | length }} qubits. Basis: 0=Z, 1=X. Green = Bases Match)</p>
-                 <div class="overflow-x-auto text-xs border rounded-md">
+                <h4 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">1. Initial State & Measurement Choices</h4>
+                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">(Showing first {{ simulation_log.alice_bits | length }} qubits. Basis: 0=Z, 1=X. Green = Bases Match)</p>
+                 <div class="overflow-x-auto text-xs border border-gray-200 dark:border-gray-700 rounded-md">
                     <table class="min-w-full">
-                        <thead class="bg-gray-100">
+                        <thead class="bg-gray-100 dark:bg-gray-700">
                             <tr>
-                                <th class="px-3 py-2 font-medium text-gray-600">Qubit #</th>
-                                <th class="px-3 py-2 font-medium text-gray-600">Alice Bit</th>
-                                <th class="px-3 py-2 font-medium text-gray-600">Alice Basis</th>
-                                <th class="px-3 py-2 font-medium text-gray-600">Bob Basis</th>
+                                <th class="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 text-center">Qubit #</th>
+                                <th class="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 text-center">Alice Bit</th>
+                                <th class="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 text-center">Alice Basis</th>
+                                <th class="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 text-center">Bob Basis</th>
                             </tr>
                         </thead>
-                        <tbody class="font-mono">
+                        <tbody class="font-mono dark:text-gray-300">
                              {% for i in range(simulation_log.alice_bits | length) %}
                                 {% set bases_match = simulation_log.alice_bases[i] == simulation_log.bob_bases[i] %}
-                                <tr class="text-center {{ 'bg-green-50' if bases_match else 'bg-red-50' }}">
-                                    <td class="px-3 py-1 border-t">{{ i }}</td>
-                                    <td class="px-3 py-1 border-t">{{ simulation_log.alice_bits[i] }}</td>
-                                    <td class="px-3 py-1 border-t">{{ simulation_log.alice_bases[i] }}</td>
-                                    <td class="px-3 py-1 border-t">{{ simulation_log.bob_bases[i] }}</td>
+                                <tr class="text-center {{ 'bg-green-50 dark:bg-green-900/30' if bases_match else 'bg-red-50 dark:bg-red-900/30' }}">
+                                    <td class="px-3 py-1 border-t border-gray-200 dark:border-gray-700">{{ i }}</td>
+                                    <td class="px-3 py-1 border-t border-gray-200 dark:border-gray-700">{{ simulation_log.alice_bits[i] }}</td>
+                                    <td class="px-3 py-1 border-t border-gray-200 dark:border-gray-700">{{ simulation_log.alice_bases[i] }}</td>
+                                    <td class="px-3 py-1 border-t border-gray-200 dark:border-gray-700">{{ simulation_log.bob_bases[i] }}</td>
                                 </tr>
                              {% endfor %}
                         </tbody>
@@ -71,49 +71,30 @@
                  </div>
             </div>
 
-            <hr class="border-gray-200">
+            <hr class="border-gray-200 dark:border-gray-700">
 
             {# Bob's Measurement & Eve's Potential Impact #}
             <div>
-                 <h4 class="text-xl font-semibold text-gray-700 mb-4">2. Bob's Measurement Outcome {% if simulation_log.eve_simulated %}<span class="text-red-600">(Potential Eve Impact)</span>{% endif %}</h4>
+                 <h4 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">2. Bob's Measurement Outcome {% if simulation_log.eve_simulated %}<span class="text-red-500">(Potential Eve Impact)</span>{% endif %}</h4>
                  {% if simulation_log.eve_simulated %}
-                    <p class="text-sm text-red-600 mb-2">Eve simulation was active (Rate: {{ simulation_log.eve_error_rate_used }}), introducing approx. {{ simulation_log.eve_errors_introduced }} errors into Bob's results below.</p>
+                    <p class="text-sm text-red-500 dark:text-red-400 mb-2">Eve simulation was active (Rate: {{ "%.3f" | format(simulation_log.eve_error_rate_used) }}), introducing approx. {{ simulation_log.eve_errors_introduced }} errors into Bob's results below.</p>
                  {% endif %}
-                 <span class="text-sm font-medium text-gray-600 block mb-1">Bob's Measured Bits (Sample):</span>
-                 <pre><code class="text-xs p-3 bg-gray-100 border rounded-md block max-h-24 overflow-y-auto font-mono">{{ simulation_log.bob_measurement_results | join('') }}</code></pre>
+                 <span class="text-sm font-medium text-gray-600 dark:text-gray-400 block mb-1">Bob's Measured Bits (Sample):</span>
+                 <pre><code class="text-xs p-3 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md block max-h-24 overflow-y-auto font-mono text-gray-800 dark:text-gray-200">{{ simulation_log.bob_measurement_results | join('') }}</code></pre>
             </div>
 
-            <hr class="border-gray-200">
+            <hr class="border-gray-200 dark:border-gray-700">
 
             {# Sifting & QBER Check Visualization #}
             <div>
-                 <h4 class="text-xl font-semibold text-gray-700 mb-4">3. Sifting & QBER Check</h4>
-                 <p class="text-sm text-gray-600 mb-3">(Showing bits where bases matched. Grayed out = Used for QBER. <span class="text-red-600 font-semibold">Red Bit</span> = Disagreement/Error.)</p>
-                 <div class="overflow-x-auto text-xs border rounded-md">
-                     <table class="min-w-full">
-                         <thead class="bg-gray-100">
-                             <tr>
-                                <th class="px-3 py-2 font-medium text-gray-600">Orig. Index</th>
-                                <th class="px-3 py-2 font-medium text-gray-600">Alice Sifted</th>
-                                <th class="px-3 py-2 font-medium text-gray-600">Bob Sifted</th>
-                                <th class="px-3 py-2 font-medium text-gray-600">Status</th>
-                             </tr>
-                         </thead>
-                         <tbody class="font-mono">
-                            {# Need to reconstruct this view based on available data #}
-                            {# We don't have the full sifted lists and QBER indices easily available in the log #}
-                            {# Placeholder text indicating limitation #}
-                             <tr><td colspan="4" class="text-center italic text-gray-500 p-4">Detailed sifted bit comparison visualization requires more granular logging data than currently stored in session. QBER summary is accurate.</td></tr>
-                             {# Actual implementation would iterate through sifted bits and check against QBER indices set #}
-                         </tbody>
-                     </table>
-                 </div>
+                 <h4 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">3. Sifting & QBER Check</h4>
+                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">Detailed bit comparison requires more granular logging. QBER summary below is accurate.</p>
 
                  {# QBER Result Summary #}
                  <div class="mt-4 text-center p-4 rounded-md font-semibold
-                    {% if simulation_log.eve_detected %}bg-red-100 text-red-700 border border-red-300
-                    {% elif simulation_log.qber >= 0 %}bg-green-100 text-green-700 border border-green-300
-                    {% else %}bg-yellow-100 text-yellow-700 border border-yellow-300
+                    {% if simulation_log.eve_detected %}bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-600
+                    {% elif simulation_log.qber >= 0 %}bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-600
+                    {% else %}bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 border border-yellow-300 dark:border-yellow-600
                     {% endif %}">
                     Calculated QBER: {{ "%.4f" | format(simulation_log.qber) if simulation_log.qber >= 0 else 'N/A' }}
                     ({{ "%.2f" | format(simulation_log.qber * 100) if simulation_log.qber >= 0 else 'N/A' }}%)
@@ -128,47 +109,100 @@
                  </div>
             </div>
 
-             <hr class="border-gray-200">
+             <hr class="border-gray-200 dark:border-gray-700">
 
             {# Final Key Result #}
             <div>
-                 <h4 class="text-xl font-semibold text-gray-700 mb-4">4. Final Generated Key</h4>
+                 <h4 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">4. Final Generated Key</h4>
                  {% if simulation_log.final_key_binary %}
-                    <span class="text-sm font-medium text-gray-600 block mb-1">Final Shared Key ({{ simulation_log.final_key_length }} bits):</span>
-                    <pre><code class="text-xs p-3 bg-gray-100 border rounded-md block max-h-24 overflow-y-auto font-mono">{{ simulation_log.final_key_binary }}</code></pre>
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400 block mb-1">Final Shared Key ({{ simulation_log.final_key_length }} bits):</span>
+                    <pre><code class="text-xs p-3 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md block max-h-24 overflow-y-auto font-mono text-gray-800 dark:text-gray-200">{{ simulation_log.final_key_binary }}</code></pre>
                  {% elif simulation_log.eve_detected %}
-                    <p class="text-red-600 font-semibold p-3 bg-red-50 border border-red-200 rounded-md">No final key generated due to high QBER / Eve detection.</p>
+                    <p class="text-red-600 dark:text-red-400 font-semibold p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-md">No final key generated due to high QBER / Eve detection.</p>
                  {% else %}
-                     <p class="text-yellow-700 font-semibold p-3 bg-yellow-50 border border-yellow-200 rounded-md">No final key generated (Reason: {{ 'Insufficient bits after QBER check' if simulation_log.qber >= 0 else 'QKD Failure' }}).</p>
+                     <p class="text-yellow-700 dark:text-yellow-400 font-semibold p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700 rounded-md">No final key generated (Reason: {{ 'Insufficient bits' if simulation_log.qber >= 0 else 'QKD Failure' }}).</p>
                  {% endif %}
             </div>
 
             {# Chart.js graph #}
-            <hr class="border-gray-200">
+            <hr class="border-gray-200 dark:border-gray-700">
             <div>
-                <h4 class="text-xl font-semibold text-gray-700 mb-4">QBER History (Simulation - Placeholder Data)</h4>
-                 <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+                <h4 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">QBER History</h4>
+                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">(Shows QBER from recent successful runs)</p>
+                 <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-200 dark:border-gray-700 relative" style="height: 300px;"> {# Fixed height container #}
                     <canvas id="qberChart"></canvas> {# Chart.js targets this #}
                  </div>
+            </div>
+
+            {# Simulation Log Samples Table #}
+            <hr class="border-gray-200 dark:border-gray-700">
+            <div>
+                <h4 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">5. Simulation Log Samples</h4>
+                 <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">(Showing first 50 values where applicable)</p>
+                 <div class="overflow-x-auto text-xs border border-gray-200 dark:border-gray-700 rounded-md">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-100 dark:bg-gray-700">
+                            <tr>
+                                <th class="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 text-left">Item</th>
+                                <th class="px-3 py-2 font-medium text-gray-600 dark:text-gray-300 text-left">Value Sample</th>
+                            </tr>
+                        </thead>
+                        <tbody class="font-mono dark:text-gray-300">
+                             <tr class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+                                 <td class="px-3 py-2 text-left align-top"><span class="font-sans font-medium text-gray-700 dark:text-gray-300">Alice Bits:</span></td>
+                                 <td class="px-3 py-2 text-left break-all">{{ simulation_log.alice_bits | join('') }}</td>
+                             </tr>
+                             <tr class="bg-gray-50 dark:bg-gray-750 border-t border-gray-200 dark:border-gray-700">
+                                 <td class="px-3 py-2 text-left align-top"><span class="font-sans font-medium text-gray-700 dark:text-gray-300">Alice Bases:</span></td>
+                                 <td class="px-3 py-2 text-left break-all">{{ simulation_log.alice_bases | join('') }}</td>
+                             </tr>
+                              <tr class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+                                 <td class="px-3 py-2 text-left align-top"><span class="font-sans font-medium text-gray-700 dark:text-gray-300">Bob Bases:</span></td>
+                                 <td class="px-3 py-2 text-left break-all">{{ simulation_log.bob_bases | join('') }}</td>
+                             </tr>
+                             <tr class="bg-gray-50 dark:bg-gray-750 border-t border-gray-200 dark:border-gray-700">
+                                 <td class="px-3 py-2 text-left align-top"><span class="font-sans font-medium text-gray-700 dark:text-gray-300">Bob Measured:</span></td>
+                                 <td class="px-3 py-2 text-left break-all">{{ simulation_log.bob_measurement_results | join('') }}</td>
+                             </tr>
+                              <tr class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+                                 <td class="px-3 py-2 text-left align-top"><span class="font-sans font-medium text-gray-700 dark:text-gray-300">Sifted Key (Pre-QBER):</span></td>
+                                 <td class="px-3 py-2 text-left break-all">{{ simulation_log.sifted_key_sample }}</td>
+                             </tr>
+                        </tbody>
+                    </table>
+                 </div>
+            </div>
+
+            {# Download Button for QKD Sim Report #}
+            <hr class="border-gray-200 dark:border-gray-700">
+            <div class="mt-8 text-center">
+              <a href="{{ url_for('download_qkd_report') }}" {# Assumes route exists #}
+                 class="inline-flex items-center justify-center px-6 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150"
+                 download> {# Optional: Add download attribute #}
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 -ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download Full QKD Report (PDF)
+              </a>
             </div>
 
         </div> {# End of main results container #}
 
     {% else %}
-        {# Message if no simulation log found in session #}
-        <div class="bg-yellow-50 border-l-4 border-yellow-400 text-yellow-700 p-4 rounded-md shadow-sm" role="alert">
+        {# Message if no simulation log found #}
+        <div class="bg-yellow-50 dark:bg-yellow-900/30 border-l-4 border-yellow-400 text-yellow-700 dark:text-yellow-300 p-4 rounded-md shadow-sm" role="alert">
             <div class="flex">
                 <div class="py-1"><svg class="fill-current h-6 w-6 text-yellow-500 mr-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M2.93 17.07A10 10 0 1 1 17.07 2.93 10 10 0 0 1 2.93 17.07zM9 11v-4h2v4H9zm0 4h2v-2H9v2z"/></svg></div>
                 <div>
                     <p class="font-bold">No Simulation Data Found</p>
-                    <p class="text-sm">Please run the QKD Simulation from the dashboard first to see detailed results here.</p>
+                    <p class="text-sm">Perform a secure transfer on the dashboard first to generate simulation data.</p>
                 </div>
             </div>
         </div>
     {% endif %}
 
     <!-- Navigation back to main page -->
-    <div class="mt-10 text-center border-t border-gray-200 pt-6">
+    <div class="mt-10 text-center border-t border-gray-200 dark:border-gray-700 pt-6">
         <a href="{{ url_for('index') }}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-300 text-sm">
             ← Back to Dashboard
         </a>
@@ -177,63 +211,69 @@
 {% endblock %}
 
 {% block scripts %}
-{# Basic Chart.js example - data needs to be passed from Flask for real use #}
+{# Script to initialize Chart.js, using data passed from Flask #}
 <script>
-    document.addEventListener('DOMContentLoaded', function () { // Ensure DOM is loaded
-        const ctx = document.getElementById('qberChart');
-        if (ctx) {
-            // --- Sample Data ---
-            // TODO: Replace this with actual data injected by Flask
-            const qberHistoryData = [0.5, 1.2, 0.8, 25.1, 0.3]; // Example QBER percentages from past runs
-            const qberLabels = ['Run 1', 'Run 2', 'Run 3', 'Run 4 (Eve?)', 'Run 5']; // Example labels
-            const qberThresholdValue = {{ QBER_THRESHOLD | default(0.15) }} * 100; // Get threshold from Flask config, convert to %
+    document.addEventListener('DOMContentLoaded', function () {
+        const canvasElement = document.getElementById('qberChart');
+        const simulationDataExists = {{ simulation_log | tojson | default('null') | safe }} !== null; // Check if log exists
 
-            new Chart(ctx, {
-                type: 'line', // Line chart for trend
-                data: {
-                    labels: qberLabels,
-                    datasets: [{
-                        label: 'Simulated QBER (%)',
-                        data: qberHistoryData,
-                        borderColor: 'rgb(59, 130, 246)', // Blue line
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        fill: true, // Optional: fill below line
-                        tension: 0.1 // Slight curve
-                     },
-                     { // Dataset for the threshold line
-                        label: 'QBER Threshold (%)',
-                        data: Array(qberLabels.length).fill(qberThresholdValue), // Array with threshold value
-                        borderColor: 'rgb(239, 68, 68)', // Red line for threshold
-                        borderDash: [5, 5], // Dashed line
-                        pointRadius: 0, // No points on the threshold line
-                        fill: false,
-                        tension: 0
-                     }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false, // Allow chart to adapt height
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: { display: true, text: 'QBER (%)' },
-                            suggestedMax: Math.max(30, qberThresholdValue * 1.2) // Set max y-axis slightly above threshold or 30
-                        },
-                        x: {
-                            title: {display: true, text: 'Simulation Run'}
-                        }
-                    },
-                     plugins: {
-                         legend: {
-                             position: 'top',
+        if (canvasElement && simulationDataExists) {
+            // Use data injected by Flask route
+            const qberLabels = {{ qber_history_labels | tojson | safe }};
+            const qberHistoryData = {{ qber_history_values | tojson | safe }};
+            const qberThresholdValue = {{ QBER_THRESHOLD | default(0.15) * 100 }}; // Ensure percentage
+
+            // Ensure thresholdData array matches the length of actual data labels
+            const thresholdData = Array(qberLabels.length).fill(qberThresholdValue);
+
+            // Check if data is valid before creating chart
+            if (!Array.isArray(qberLabels) || !Array.isArray(qberHistoryData) || qberLabels.length === 0 || qberHistoryData.length === 0 || qberLabels[0] === 'N/A') {
+                console.warn("No valid QBER history data available for chart display.");
+                canvasElement.parentElement.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center text-sm p-4">No QBER history data available to display.</p>';
+                return; // Don't initialize chart with invalid data
+            }
+
+            // Proceed with chart initialization
+            try {
+                new Chart(canvasElement, {
+                    type: 'line',
+                    data: {
+                        labels: qberLabels,
+                        datasets: [{
+                            label: 'QBER (%)', // Simplified label
+                            data: qberHistoryData,
+                            borderColor: 'rgb(59, 130, 246)', // blue-500
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true, tension: 0.1, pointRadius: 3, pointHoverRadius: 5
                          },
-                         tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                         }
+                         {
+                            label: 'Threshold (%)', // Simplified label
+                            data: thresholdData,
+                            borderColor: 'rgb(239, 68, 68)', // red-500
+                            borderWidth: 2, borderDash: [6, 6], pointRadius: 0, fill: false, tension: 0
+                         }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true, title: { display: true, text: 'QBER (%)' }, suggestedMax: Math.max(25, qberThresholdValue * 1.2) },
+                            x: { title: { display: true, text: 'Transaction Log ID' } } // Changed label
+                        },
+                        plugins: {
+                            legend: { position: 'top' },
+                            tooltip: { mode: 'index', intersect: false }
+                        }
                     }
-                }
-            });
+                });
+                console.log("QBER history chart initialized.");
+            } catch (error) {
+                 console.error("Failed to create Chart.js instance:", error);
+                 canvasElement.parentElement.innerHTML = '<p class="text-red-500 text-center text-sm p-4">Error loading chart.</p>';
+            }
+
+        } else if (!simulationDataExists) {
+            console.log("Chart not initialized: simulation_log data missing.");
+            // Keep the "No Simulation Data Found" message displayed by Jinja
         } else {
             console.log("Chart canvas element 'qberChart' not found.");
         }

@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const qberData = window.qkdChartQberData || [0];
     // Default threshold to a reasonable value if not provided
     const qberThreshold = typeof window.qkdChartQberThreshold === 'number'
-        ? window.qkdChartQberThreshold
+        ? window.qkdChartQberThreshold // Expecting percentage value now
         : 15.0; // Default to 15%
 
     // Basic validation
@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
      if (labels.length === 1 && labels[0] === 'No Data') {
          console.log("No QBER history data provided for chart.");
-         // Optionally display a message instead of an empty chart
+         // Display a message instead of an empty chart
           canvasElement.parentElement.innerHTML = '<p class="text-gray-500 text-center text-sm p-4">No QBER history data available to display.</p>';
          return;
      }
@@ -44,7 +44,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 labels: labels,
                 datasets: [{
                     label: 'Simulated QBER (%)',
-                    data: qberData,
+                    data: qberData, // Should be percentage values
                     borderColor: 'rgb(59, 130, 246)', // Tailwind blue-500
                     backgroundColor: 'rgba(59, 130, 246, 0.1)',
                     fill: true,
@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', function () {
                  },
                  { // Threshold Line
                     label: 'QBER Threshold (%)',
-                    data: Array(labels.length).fill(qberThreshold),
+                    data: Array(labels.length).fill(qberThreshold), // Use percentage value
                     borderColor: 'rgb(239, 68, 68)', // Tailwind red-500
                     borderWidth: 2,
                     borderDash: [6, 6],

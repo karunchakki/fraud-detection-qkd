@@ -1,162 +1,109 @@
 # fraud_detection.py
-# Module for simple classical fraud detection logic based on transaction patterns.
+# Orchestrates fraud checks using simple rules and ML model predictions.
+# --- VERSION WITH ML INTEGRATION AND CORRECTED LOGGING ---
 
 import datetime
-from typing import List, Dict, Any, Optional, Set
-from decimal import Decimal, InvalidOperation # Use Decimal for consistency if amounts are Decimal
+import logging
+from typing import Dict, List, Any, Optional, Set
 
-# --- Configuration Defaults (can be overridden by values passed from app.config) ---
-DEFAULT_AMOUNT_THRESHOLD = 10000.00  # Flag transactions greater than this amount
-DEFAULT_RAPID_TRANSACTION_SECONDS = 10 # Flag if transaction occurs within this many seconds of the previous one
-DEFAULT_BLACKLIST = {"fraudster_account", "suspicious_user123"} # Example blacklist usernames
+# Import functions from the new ML module
+try:
+    # Use the function defined in ml_fraud_model.py to check loading status
+    from ml_fraud_model import preprocess_input_features, predict_fraud_proba, is_ml_model_loaded
+except ImportError as e:
+    logging.error(f"Could not import ML model functions: {e}. ML fraud detection disabled.")
+    # Define dummy functions if import fails to prevent crashes later
+    def preprocess_input_features(*args, **kwargs): return None
+    def predict_fraud_proba(*args, **kwargs): return -1.0
+    def is_ml_model_loaded(): return False
+
+
+# --- Configuration ---
+# Keep blacklist if desired
+DEFAULT_BLACKLIST = {"fraudster_account", "suspicious_user123"} # Example blacklist
+# Define a threshold for the ML model's probability score
+# This should be tuned based on model performance (precision/recall tradeoff)
+ML_FRAUD_THRESHOLD = 0.75 # Example: Flag if predicted probability > 75%
 
 # --- Main Fraud Detection Function ---
-
 def detect_fraud(
-    current_transaction: Dict[str, Any],
-    user_transaction_history: List[Dict[str, Any]],
+    current_transaction: Dict[str, Any], # Contains 'amount', 'timestamp', 'recipient_username'
+    user_transaction_history: List[Dict[str, Any]], # List of dicts: 'amount', 'timestamp' (Newest first)
     blacklist: Optional[Set[str]] = None,
-    amount_threshold: Optional[float] = None,
-    rapid_transaction_seconds: Optional[int] = None
+    # NOTE: amount_threshold and rapid_transaction_seconds arguments removed
+    # as these concepts are now handled by the ML model's features.
 ) -> Dict[str, Any]:
     """
-    Analyzes a single NEW transaction against simple fraud rules using historical context.
+    Performs fraud checks using a blacklist and a pre-trained ML model.
 
     Args:
-        current_transaction: Dictionary representing the transaction to check.
-                             Expected keys: 'amount' (float or Decimal),
-                                            'recipient_username' (str),
-                                            'timestamp' (datetime.datetime).
-        user_transaction_history: List of previous transactions for the same user,
-                                  sorted chronologically (oldest to newest).
-                                  Each element is a dict, expected keys:
-                                  'amount', 'timestamp' (datetime.datetime).
-        blacklist: A set of recipient usernames considered high-risk or fraudulent.
-                   If None, uses DEFAULT_BLACKLIST defined in this module.
-        amount_threshold: Override for the amount threshold. If None, uses DEFAULT_AMOUNT_THRESHOLD.
-        rapid_transaction_seconds: Override for the time gap check. If None, uses DEFAULT_RAPID_TRANSACTION_SECONDS.
-
+        current_transaction (dict): Details of the transaction to check.
+        user_transaction_history (list): Recent history for the user (newest first).
+        blacklist (set, optional): Set of blacklisted recipient usernames.
 
     Returns:
-        A dictionary:
-        {
-            'is_fraudulent': bool, # True if any rule triggered
-            'reason': str | None  # Explanation string if fraudulent (rules concatenated), None otherwise
-        }
+        dict: {'is_fraudulent': bool, 'reason': str | None, 'ml_score': float}
     """
-    # Use provided config values if passed, otherwise fall back to module defaults
     final_blacklist = blacklist if blacklist is not None else DEFAULT_BLACKLIST
-    final_amount_threshold = amount_threshold if amount_threshold is not None else DEFAULT_AMOUNT_THRESHOLD
-    final_rapid_seconds = rapid_transaction_seconds if rapid_transaction_seconds is not None else DEFAULT_RAPID_TRANSACTION_SECONDS
+    reasons = []
+    ml_score = -1.0 # Default score if prediction fails or model not loaded
 
-    reasons = [] # List to collect reasons if multiple rules trigger
-
-    # --- Rule 1: Amount Check ---
-    try:
-        # Convert amount to Decimal for reliable comparison, handle potential errors
-        current_amount = Decimal(str(current_transaction.get('amount', 0)))
-        threshold_decimal = Decimal(str(final_amount_threshold))
-
-        if current_amount > threshold_decimal:
-            reasons.append(f"Amount ({current_amount:.2f}) exceeds threshold ({threshold_decimal:.2f})")
-    except (InvalidOperation, TypeError, KeyError, ValueError) as e:
-         # Catch potential errors during conversion or key access
-         print(f"Warning: Could not perform amount check due to data issue: {e}")
-
-    # --- Rule 2: Time Gap Check ---
-    # Requires sorted history and valid datetime timestamps in both current and last historical transaction
-    if user_transaction_history and 'timestamp' in current_transaction:
-        try:
-            # Get the timestamp of the *most recent* transaction in the history (last element)
-            last_txn = user_transaction_history[-1]
-            last_txn_time = last_txn.get('timestamp')
-            current_time = current_transaction['timestamp'] # Assumes this is a datetime object passed from app.py
-
-            # Ensure both are valid datetime objects before calculating difference
-            if isinstance(last_txn_time, datetime.datetime) and isinstance(current_time, datetime.datetime):
-                time_diff = (current_time - last_txn_time).total_seconds()
-                # Check if the time difference is positive (current is after last) but less than the threshold
-                if 0 <= time_diff < final_rapid_seconds:
-                    reasons.append(f"Rapid transaction detected ({time_diff:.1f}s after previous)")
-            elif last_txn_time: # Log if types are wrong but data exists, preventing comparison
-                 print(f"Warning: Timestamps are not valid datetime objects ({type(last_txn_time)}, {type(current_time)}), skipping time gap check.")
-
-        except (KeyError, TypeError, IndexError) as e:
-            # Catch potential errors if history is malformed or keys are missing
-            print(f"Warning: Error during time gap check: {e}")
-
-    # --- Rule 3: Blacklist Check ---
+    # --- Rule 1: Blacklist Check (Simple Rule - Kept) ---
     recipient_username = current_transaction.get('recipient_username')
     if recipient_username and recipient_username in final_blacklist:
+        logging.warning(f"Fraud Check: Recipient '{recipient_username}' is blacklisted.")
         reasons.append(f"Recipient '{recipient_username}' is blacklisted")
 
+    # --- Rule 2: ML Model Prediction ---
+    if is_ml_model_loaded():
+        logging.debug("ML Model loaded. Proceeding with ML fraud check.")
+        # Preprocess data for the model
+        input_features_df = preprocess_input_features(current_transaction, user_transaction_history)
+
+        if input_features_df is not None:
+            # Get fraud probability from the loaded ML model
+            ml_score = predict_fraud_proba(input_features_df)
+
+            if ml_score >= ML_FRAUD_THRESHOLD:
+                logging.warning(f"Fraud Check: ML Prediction Score ({ml_score:.3f}) exceeds threshold ({ML_FRAUD_THRESHOLD:.3f}). Flagging transaction.")
+                # Add a specific reason indicating ML flag
+                reasons.append(f"High ML Fraud Score ({ml_score:.3f})")
+            elif ml_score >= 0: # Prediction successful but below threshold
+                 logging.info(f"Fraud Check: ML Prediction Score: {ml_score:.3f} (Below Threshold)")
+            else: # ml_score is -1.0, indicating prediction error
+                 reasons.append("ML Prediction failed") # Add reason
+                 logging.error("Fraud Check: ML model prediction failed (returned -1.0).")
+        else:
+             # Preprocessing failed
+             reasons.append("ML Feature preprocessing failed")
+             logging.error("Fraud Check: ML feature preprocessing failed.")
+    else:
+        # Log if model isn't loaded, maybe add to reasons if critical
+        logging.warning("Fraud Check: ML Model is not loaded. Skipping ML prediction.")
+        # Decide if 'ML Model not available' should be a flagging reason
+        # For now, let's not add it automatically, rely on other rules or config
+        reasons.append("ML Model not available") # Add reason if model not loaded
+
     # --- Determine Final Status ---
-    is_fraudulent = len(reasons) > 0 # Flagged if any reason was added
-    reason_str = "; ".join(reasons) if is_fraudulent else None # Combine reasons if flagged
+    # Flag if blacklist OR ML model score exceeds threshold.
+    # Errors during ML process (preprocessing/prediction failure/model not loaded) also currently lead to flagging
+    # because they add to the 'reasons' list.
+    is_fraudulent = len(reasons) > 0
 
-    # Log the outcome of this specific check
-    print(f"Fraud Detection Check: Flagged={is_fraudulent}, Reason='{reason_str}'")
+    # Combine reasons for logging/storage
+    reason_str = "; ".join(reasons) if is_fraudulent else None
 
-    # Return the result dictionary
+    # --- CORRECTED LOGGING ---
+    # Determine the string representation for the score *before* the f-string
+    ml_score_str = f"{ml_score:.3f}" if ml_score >= 0 else 'N/A'
+    # Use the pre-formatted string in the log message
+    logging.info(f"Final Fraud Detection Result: Flagged={is_fraudulent}, Reason='{reason_str}', ML Score={ml_score_str}")
+    # --- END CORRECTION ---
+
     return {
         'is_fraudulent': is_fraudulent,
-        'reason': reason_str
+        'reason': reason_str,
+        'ml_score': ml_score # Return score (-1.0 indicates error/not run)
     }
 
-# --- Example Usage (for testing the module directly) ---
-if __name__ == '__main__':
-    print("--- Fraud Detection Module Tests ---")
-    # Make sure timestamps are datetime objects for testing
-    now = datetime.datetime.now()
-    # Sample history data (oldest first)
-    history_sample = [
-        {'id': 1, 'amount': Decimal('50.00'), 'recipient_username': 'bob', 'timestamp': now - datetime.timedelta(minutes=5)},
-        {'id': 2, 'amount': Decimal('100.00'), 'recipient_username': 'charlie', 'timestamp': now - datetime.timedelta(seconds=30)},
-    ]
-
-    print(f"Test History Length: {len(history_sample)}")
-    if history_sample: print(f"Last history timestamp: {history_sample[-1].get('timestamp')}")
-
-    # Test cases
-    test_txn_1 = {'amount': 15000.0, 'recipient_username': 'dave', 'timestamp': now} # High amount
-    test_txn_2 = {'amount': 20.0, 'recipient_username': 'eve', 'timestamp': now - datetime.timedelta(seconds=5)} # Rapid (relative to history_sample[-1])
-    test_txn_3 = {'amount': 50.0, 'recipient_username': 'fraudster_account', 'timestamp': now} # Blacklisted recipient
-    test_txn_4 = {'amount': 100.0, 'recipient_username': 'frank', 'timestamp': now} # Should be normal
-
-    # Run tests using default thresholds/blacklist from this module
-    print("\nTest 1 (High Amount):")
-    print(detect_fraud(test_txn_1, history_sample))
-
-    print("\nTest 2 (Rapid Transaction):")
-    print(detect_fraud(test_txn_2, history_sample))
-
-    print("\nTest 3 (Blacklisted Recipient):")
-    print(detect_fraud(test_txn_3, history_sample))
-
-    print("\nTest 4 (Normal Transaction):")
-    print(detect_fraud(test_txn_4, history_sample))
-
-    # Example combining multiple reasons
-    print("\nTest 5 (Combined - High Amount, Rapid, Blacklisted):")
-    combined_txn = {'amount': 12000.0, 'recipient_username': 'fraudster_account', 'timestamp': now - datetime.timedelta(seconds=3)}
-    print(detect_fraud(combined_txn, history_sample))
-
-    # Test edge case: No prior transaction history
-    print("\nTest 6 (No History - Time gap check should be skipped):")
-    print(detect_fraud(test_txn_4, []))
-
-    # Test edge case: Passing custom configuration overrides
-    print("\nTest 7 (Custom Config - Lower Threshold, Larger Time Gap, New Blacklist):")
-    custom_blacklist_set = {'dave'}
-    custom_amount_threshold_val = 50.0
-    custom_rapid_seconds_val = 60 # Increase time gap allowance
-    print(detect_fraud(
-        current_transaction=test_txn_1, # Amount 15000, recipient 'dave'
-        user_transaction_history=history_sample,
-        blacklist=custom_blacklist_set, # Should trigger blacklist
-        amount_threshold=custom_amount_threshold_val, # Should trigger amount
-        rapid_transaction_seconds=custom_rapid_seconds_val # Should NOT trigger time gap now
-    ))
-    # Expected result: is_fraudulent=True, Reason includes Amount and Blacklist
-
-    print("\n--- End Fraud Detection Tests ---")
+# --- END OF fraud_detection.py FILE ---
