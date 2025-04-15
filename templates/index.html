@@ -92,7 +92,7 @@
                 </div>
             </div>
 
-            <!-- Simulate Eve Checkbox - NOW PART OF TRANSFER FORM -->
+            <!-- Simulate Eve Checkbox -->
             <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200">
                 <input type="checkbox" id="simulate_eve_transfer" name="simulate_eve" value="true"
                        class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
@@ -102,7 +102,7 @@
                 </label>
             </div>
 
-            <!-- Submit Button - Always Enabled -->
+            <!-- Submit Button -->
             <div>
                 <button type="submit" class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -120,7 +120,7 @@
 
     <hr class="my-10 border-t border-gray-200">
 
-    <!-- NEW: Display Result of the Last Transfer Attempt -->
+    <!-- Display Result of the Last Transfer Attempt -->
     {% if last_transfer_outcome %}
     <div class="mt-6 mb-8">
          <h3 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Last Transfer Attempt Outcome</h3>
@@ -155,6 +155,10 @@
                         <span class="text-green-600">Passed</span>
                     {% endif %}
                  </p>
+                 {# Optional: Display ML Score if available #}
+                 {% if last_transfer_outcome.fraud_check.ml_score is defined and last_transfer_outcome.fraud_check.ml_score >= 0 %}
+                     <p class="text-xs text-gray-500"><span class="font-semibold">ML Score:</span> {{ "%.3f" | format(last_transfer_outcome.fraud_check.ml_score) }}</p>
+                 {% endif %}
             {% endif %}
 
             {# Show Log ID if successful #}
@@ -165,7 +169,10 @@
                  </p>
             {% endif %}
 
-            <a href="{{ url_for('qkd_page') }}" class="text-xs text-indigo-600 hover:underline font-medium mt-2 inline-block">View Full QKD Log →</a>
+            {# Link to detailed QKD log page #}
+            {% if last_transfer_outcome.qkd_log_stored %}
+             <a href="{{ url_for('qkd_page') }}" class="text-xs text-indigo-600 hover:underline font-medium mt-2 inline-block">View Full QKD Log →</a>
+            {% endif %}
 
          </div>
     </div>

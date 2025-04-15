@@ -1,7 +1,7 @@
 # qkd_simulation.py
 # This module simulates the BB84 Quantum Key Distribution protocol using Qiskit.
 # Includes options for Eve simulation, QBER calculation, and PDF report generation for the simulation details.
-# VERSION: Includes corrected PDF saving syntax in __main__ block.
+# VERSION: Tier 1 Refined - Includes enhanced PDF reporting, better logging, fixed main block PDF saving.
 
 # --- Ensure necessary libraries are installed: pip install qiskit-aer numpy reportlab ---
 
@@ -11,7 +11,7 @@ from qiskit_aer import AerSimulator
 import random
 import numpy as np
 import math
-import logging
+import logging # Use logging for simulation messages
 
 # --- PDF Generation Imports (ReportLab) ---
 import datetime
@@ -19,12 +19,12 @@ import io
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
     from reportlab.lib import colors
     REPORTLAB_AVAILABLE = True
 except ImportError:
-    # Log warning but allow module to load if reportlab is missing, PDF generation will fail gracefully later.
     logging.warning("\n'reportlab' library not found. PDF report generation for QKD simulation will be disabled.")
     logging.warning("Install using: pip install reportlab\n")
     REPORTLAB_AVAILABLE = False
@@ -51,14 +51,9 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
         eve_interception_rate (float): Probability Eve's action causes an error per qubit.
 
     Returns:
-        dict: A dictionary containing simulation results:
+        dict: A dictionary containing simulation results including:
               'final_key_binary': str | None, 'qber': float (-1,-2,-3 for errors),
-              'eve_detected': bool, 'initial_qubits': int, 'sifted_indices_count': int,
-              'qber_sample_count': int, 'qber_disagreements': int, 'final_key_length': int,
-              'alice_bits': list (sample), 'alice_bases': list (sample), 'bob_bases': list (sample),
-              'bob_measurement_results': list (sample), 'sifted_key_sample': str (sample),
-              'eve_simulated': bool, 'eve_error_rate_used': float, 'eve_errors_introduced': int,
-              'qber_threshold_used': float
+              'eve_detected': bool, and various parameters and log samples.
     """
     # Initialize result dictionary structure
     result_dict = {
@@ -68,7 +63,7 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
         'alice_bits': [], 'alice_bases': [], 'bob_bases': [],
         'bob_measurement_results': [], 'sifted_key_sample': "",
         'eve_simulated': simulate_eve, 'eve_error_rate_used': 0.0, 'eve_errors_introduced': 0,
-        'qber_threshold_used': qber_threshold # Store threshold used
+        'qber_threshold_used': qber_threshold
     }
 
     # Basic validation
@@ -76,15 +71,13 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
     if n_qubits < min_required_qubits or n_qubits < 4 * MIN_FINAL_KEY_LENGTH:
          required = max(min_required_qubits, 4 * MIN_FINAL_KEY_LENGTH)
          logging.error(f"Error: n_qubits ({n_qubits}) too low. Need >= {required}.")
-         result_dict['qber'] = -2.0 # Insufficient start qubits code
+         result_dict['qber'] = -2.0
          return result_dict
 
     # --- Steps 1-5: Alice, Bob, Circuit, Simulation ---
-    logging.info(f"Starting BB84 sim: {n_qubits} qubits, Eve={simulate_eve} (Rate={eve_interception_rate if simulate_eve else 0}), QBER_Thresh={qber_threshold}")
+    logging.info(f"Starting BB84 sim: {n_qubits} qubits, Eve={simulate_eve} (Rate={eve_interception_rate if simulate_eve else 0:.3f}), QBER_Thresh={qber_threshold:.3f}")
     alice_bits = [random.randint(0, 1) for _ in range(n_qubits)]
-    alice_bases = [random.randint(0, 1) for _ in range(n_qubits)] # 0=Z, 1=X
-    result_dict['alice_bits'] = alice_bits[:50]
-    result_dict['alice_bases'] = alice_bases[:50]
+    alice_bases = [random.randint(0, 1) for _ in range(n_qubits)]; result_dict['alice_bits'] = alice_bits[:50]; result_dict['alice_bases'] = alice_bases[:50]
     logging.debug("Alice bits/bases generated.")
 
     qc = QuantumCircuit(n_qubits, n_qubits)
@@ -93,8 +86,7 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
         if alice_bases[i] == 1: qc.h(i)
     logging.debug("Qiskit circuit prepared by Alice.")
 
-    bob_bases = [random.randint(0, 1) for _ in range(n_qubits)]
-    result_dict['bob_bases'] = bob_bases[:50]
+    bob_bases = [random.randint(0, 1) for _ in range(n_qubits)]; result_dict['bob_bases'] = bob_bases[:50]
     logging.debug("Bob bases generated.")
 
     for i in range(n_qubits):
@@ -104,32 +96,20 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
 
     logging.debug("Running AerSimulator...")
     try:
-        simulator = AerSimulator()
-        job = simulator.run(qc, shots=1, memory=True)
-        sim_result = job.result()
-        measured_bits_str = sim_result.get_memory(qc)[0]
-        bob_measured_bits_ideal = [int(bit) for bit in measured_bits_str[::-1]]
+        simulator = AerSimulator(); job = simulator.run(qc, shots=1, memory=True); sim_result = job.result()
+        measured_bits_str = sim_result.get_memory(qc)[0]; bob_measured_bits_ideal = [int(bit) for bit in measured_bits_str[::-1]]
         logging.debug("AerSimulator execution successful.")
-    except Exception as e:
-        logging.error(f"Error during Qiskit simulation: {e}", exc_info=True)
-        result_dict['qber'] = -3.0 # Simulation failed code
-        return result_dict
+    except Exception as e: logging.error(f"Error during Qiskit simulation: {e}", exc_info=True); result_dict['qber'] = -3.0; return result_dict
 
     # --- Simulate Eve's Effect ---
     bob_measured_bits = list(bob_measured_bits_ideal)
     if simulate_eve:
-        logging.warning(f"!!! Simulating Eavesdropper (Eve) with error rate: {eve_interception_rate:.2f} !!!")
+        logging.warning(f"!!! Simulating Eavesdropper (Eve) with error rate: {eve_interception_rate:.3f} !!!")
         error_count = 0; indices_to_flip = []
-        # Decide which indices to flip based on rate
         for i in range(n_qubits):
-            if random.random() < eve_interception_rate:
-                indices_to_flip.append(i)
-                error_count += 1
-        # Apply flips
-        for i in indices_to_flip:
-            bob_measured_bits[i] = 1 - bob_measured_bits[i] # Flip 0->1 or 1->0
-        result_dict['eve_errors_introduced'] = error_count
-        result_dict['eve_error_rate_used'] = eve_interception_rate
+            if random.random() < eve_interception_rate: indices_to_flip.append(i); error_count += 1
+        for i in indices_to_flip: bob_measured_bits[i] = 1 - bob_measured_bits[i]
+        result_dict['eve_errors_introduced'] = error_count; result_dict['eve_error_rate_used'] = eve_interception_rate
         logging.info(f"Eve simulation introduced {error_count} errors.")
     result_dict['bob_measurement_results'] = bob_measured_bits[:50]
 
@@ -137,14 +117,10 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
     logging.debug("Starting sifting process...")
     alice_sifted_bits = []; bob_sifted_bits = []; sifted_indices = []
     for i in range(n_qubits):
-        if alice_bases[i] == bob_bases[i]:
-            alice_sifted_bits.append(alice_bits[i])
-            bob_sifted_bits.append(bob_measured_bits[i])
-            sifted_indices.append(i)
-    num_sifted = len(alice_sifted_bits)
-    result_dict['sifted_indices_count'] = num_sifted
+        if alice_bases[i] == bob_bases[i]: alice_sifted_bits.append(alice_bits[i]); bob_sifted_bits.append(bob_measured_bits[i]); sifted_indices.append(i)
+    num_sifted = len(alice_sifted_bits); result_dict['sifted_indices_count'] = num_sifted
     result_dict['sifted_key_sample'] = "".join(map(str, alice_sifted_bits[:50]))
-    logging.info(f"--- Sifting --- \nNumber of sifted bits: {num_sifted} (Efficiency: {num_sifted/n_qubits:.2%})") # Formatted percentage
+    logging.info(f"--- Sifting --- \nNumber of sifted bits: {num_sifted} (Efficiency: {num_sifted/n_qubits:.2%})")
 
     # --- 7. QBER Calculation ---
     logging.debug("Starting QBER calculation...")
@@ -159,7 +135,7 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
     try: qber = float(disagreements / num_qber_samples) if num_qber_samples > 0 else -1.0
     except ZeroDivisionError: qber = -1.0; logging.error("Division by zero during QBER calculation.")
     result_dict['qber'] = round(qber, 5) if qber >= 0 else qber
-    logging.info(f"--- QBER Check ---"); logging.info(f"Comparing {num_qber_samples} bits, found {disagreements} disagreements. QBER = {result_dict['qber']:.4f}")
+    logging.info(f"--- QBER Check ---"); logging.info(f"Compared {num_qber_samples} bits, found {disagreements} disagreements. QBER = {result_dict['qber']:.4f}")
     if qber >= 0 and qber > qber_threshold:
         logging.warning(f"ALERT: QBER ({qber:.4f}) > threshold ({qber_threshold:.4f}). Eavesdropping likely!"); result_dict['eve_detected'] = True; return result_dict
     elif qber >= 0: logging.info(f"QBER ({qber:.4f}) <= threshold ({qber_threshold:.4f})."); result_dict['eve_detected'] = False
@@ -179,7 +155,7 @@ def simulate_bb84(n_qubits=600, simulate_eve=False, qber_threshold=0.15, eve_int
     return result_dict
 
 
-# --- PDF Generation Function (Enhanced) ---
+# --- PDF Generation Function ---
 def create_qkd_report_pdf(results: dict) -> bytes | None:
     """
     Generates a comprehensive PDF report from the QKD simulation results dictionary.
@@ -197,18 +173,22 @@ def create_qkd_report_pdf(results: dict) -> bytes | None:
         logging.error("Cannot generate QKD PDF report: No simulation results provided.")
         return None
 
-    buffer = io.BytesIO()
+    buffer = None # Initialize buffer
     try:
+        buffer = io.BytesIO()
+        # Setup document template with adjusted bottom margin for footer
         doc = SimpleDocTemplate(buffer, pagesize=A4,
                                 leftMargin=0.75*inch, rightMargin=0.75*inch,
-                                topMargin=0.75*inch, bottomMargin=0.75*inch)
+                                topMargin=0.75*inch, bottomMargin=1.0*inch) # Increased bottom margin
         styles = getSampleStyleSheet()
         story = []; run_timestamp = datetime.datetime.now()
-        logging.debug("Starting QKD PDF report generation...")
+        logging.info(f"Starting QKD PDF report generation for sim results...")
 
         # --- Title and Timestamp ---
-        title = "QKD Simulation Report (BB84)"; timestamp_str = run_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
-        story.append(Paragraph(title, styles['h1'])); story.append(Paragraph(f"Report Generated: {timestamp_str}", styles['Normal']))
+        title = "QKD Simulation Report (BB84)"
+        timestamp_str = run_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+        story.append(Paragraph(title, styles['h1']))
+        story.append(Paragraph(f"Report Generated: {timestamp_str}", styles['Normal']))
         story.append(Spacer(1, 0.2*inch))
 
         # --- Determine Overall Status ---
@@ -216,6 +196,7 @@ def create_qkd_report_pdf(results: dict) -> bytes | None:
         qber = results.get('qber', -1.0); eve_detected = results.get('eve_detected', False)
         final_key = results.get('final_key_binary'); final_key_len = results.get('final_key_length', 0)
         sifted_count = results.get('sifted_indices_count', 0)
+
         if qber == -3.0: status = "Failure: Qiskit Simulation Error"
         elif qber == -2.0: status = "Failure: Insufficient Initial Qubits"
         elif qber == -1.0 and sifted_count < MIN_SIFTED_FOR_QBER: status, status_style.textColor = "Failure: Not Enough Sifted Bits for QBER", colors.orange
@@ -223,7 +204,9 @@ def create_qkd_report_pdf(results: dict) -> bytes | None:
         elif eve_detected: status = "Failure: Eavesdropping Detected (High QBER)"
         elif not final_key or final_key_len < MIN_FINAL_KEY_LENGTH: status, status_style.textColor = "Failure: Final Key Too Short / Not Generated", colors.orange
         elif final_key: status, status_style.textColor = "Success: Secure Key Established", colors.darkgreen
-        story.append(Paragraph(f"Overall Status: {status}", status_style)); story.append(Spacer(1, 0.2*inch))
+
+        story.append(Paragraph(f"Overall Status: {status}", status_style))
+        story.append(Spacer(1, 0.2*inch))
 
         # --- Summary Table ---
         story.append(Paragraph("Simulation Summary:", styles['h2']))
@@ -262,7 +245,10 @@ def create_qkd_report_pdf(results: dict) -> bytes | None:
         if final_key:
             story.append(Paragraph("Final Secret Key (Sample):", styles['h2']))
             key_sample = final_key[:120] + ("..." if len(final_key) > 120 else "")
-            key_paragraph = Paragraph(key_sample, styles['Code']); story.append(key_paragraph); story.append(Spacer(1, 0.2*inch))
+            # Use Paragraph with Code style for wrapping
+            code_style = styles['Code']
+            key_paragraph = Paragraph(key_sample, code_style)
+            story.append(key_paragraph); story.append(Spacer(1, 0.2*inch))
 
         # --- Log Samples Table ---
         story.append(Paragraph("Simulation Log Samples (First 50 Qubits):", styles['h2']))
@@ -281,18 +267,32 @@ def create_qkd_report_pdf(results: dict) -> bytes | None:
             ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),('GRID', (0, 0), (-1, -1), 0.5, colors.darkgrey),
             ('FONTSIZE', (0, 1), (-1,-1), 7),])); story.append(log_table)
 
+
+        # --- DEFINE FOOTER FUNCTION ---
+        def footer_content(canvas, doc):
+            """Draws the footer text on each page."""
+            canvas.saveState()
+            footer_style = styles['Normal']; footer_style.fontSize = 8
+            page_num_text = f"Page {doc.page}"; canvas.drawRightString(doc.width + doc.leftMargin*0.9, 0.5*inch, page_num_text)
+            canvas.setFont('Times-Roman', 8)
+            canvas.drawString(doc.leftMargin, 0.5*inch, f"QSB QKD Simulation Report - Generated: {run_timestamp.strftime('%Y-%m-%d %H:%M')}")
+            canvas.restoreState()
+        # --- END FOOTER FUNCTION ---
+
+
         # --- Build PDF ---
-        doc.build(story)
+        doc.build(story, onFirstPage=footer_content, onLaterPages=footer_content) # Apply footer
         pdf_bytes = buffer.getvalue(); buffer.close()
         logging.info(f"QKD PDF report generated successfully ({len(pdf_bytes)} bytes)")
         return pdf_bytes
     except Exception as e:
         logging.error(f"Error building QKD PDF report: {e}", exc_info=True)
-        if 'buffer' in locals() and not buffer.closed: buffer.close()
+        if buffer and not buffer.closed: buffer.close()
         return None
 
 # Import required for Platypus measurements (needed within the PDF function)
-from reportlab.lib.units import inch
+if REPORTLAB_AVAILABLE:
+    from reportlab.lib.units import inch
 
 # --- Example Usage (Corrected PDF Saving) ---
 if __name__ == '__main__':
@@ -306,35 +306,29 @@ if __name__ == '__main__':
     print("Test 1: No Eve...")
     results_no_eve = simulate_bb84(n_qubits=300, simulate_eve=False, qber_threshold=test_qber_threshold)
     pdf_data_1 = None # Initialize
-    if results_no_eve:
+    if results_no_eve and REPORTLAB_AVAILABLE: # Check if reportlab is loaded
         pdf_data_1 = create_qkd_report_pdf(results_no_eve)
-    # Save PDF if generation succeeded
     if pdf_data_1:
         try:
-            with open("qkd_report_test1_no_eve.pdf", "wb") as f: # Indented block
-                f.write(pdf_data_1)
-            print("Saved PDF: qkd_report_test1_no_eve.pdf") # Indented
-        except IOError as e:
-            print(f"Error saving PDF for Test 1: {e}")
-    else:
-        print("PDF generation failed for Test 1.")
+            with open("qkd_report_test1_no_eve.pdf", "wb") as f: f.write(pdf_data_1)
+            print("Saved PDF: qkd_report_test1_no_eve.pdf")
+        except IOError as e: print(f"Error saving PDF for Test 1: {e}")
+    elif REPORTLAB_AVAILABLE: print("PDF generation failed for Test 1.")
+    else: print("PDF generation skipped for Test 1 (reportlab not installed).")
     print("-" * 30)
 
     # Test 2: With Eve
     print("Test 2: With Eve...")
     results_with_eve = simulate_bb84(n_qubits=600, simulate_eve=True, qber_threshold=test_qber_threshold, eve_interception_rate=0.30)
     pdf_data_2 = None # Initialize
-    if results_with_eve:
+    if results_with_eve and REPORTLAB_AVAILABLE:
         pdf_data_2 = create_qkd_report_pdf(results_with_eve)
-    # Save PDF if generation succeeded
     if pdf_data_2:
         try:
-            with open("qkd_report_test2_with_eve.pdf", "wb") as f: # Indented block
-                f.write(pdf_data_2)
-            print("Saved PDF: qkd_report_test2_with_eve.pdf") # Indented
-        except IOError as e:
-            print(f"Error saving PDF for Test 2: {e}")
-    else:
-        print("PDF generation failed for Test 2.")
+            with open("qkd_report_test2_with_eve.pdf", "wb") as f: f.write(pdf_data_2)
+            print("Saved PDF: qkd_report_test2_with_eve.pdf")
+        except IOError as e: print(f"Error saving PDF for Test 2: {e}")
+    elif REPORTLAB_AVAILABLE: print("PDF generation failed for Test 2.")
+    else: print("PDF generation skipped for Test 2 (reportlab not installed).")
 
     print("\n" + "="*25 + " End Simulation Tests " + "="*25 + "\n")

@@ -1,7 +1,8 @@
 # app.py
 # FINAL COMPLETE VERSION - QKD Secure Banking Demo
 # Includes: User Auth, MySQL, QKD Sim, Fernet Encryption, ML Fraud Detection,
-#           PDF Reporting, Info Pages, Risk Simulation. (Added Debug Logging)
+#           PDF Reporting, Info Pages, Risk Simulation. (Error Handling Enhanced)
+# NOTE: qkd_page function restored to full version with DB query.
 
 # --- Core Imports ---
 from flask import (Flask, request, render_template, flash, redirect, url_for,
@@ -13,7 +14,6 @@ import base64
 import hashlib
 import traceback
 import logging
-from logging.handlers import RotatingFileHandler # For file logging
 
 # --- Database Import ---
 import mysql.connector
@@ -56,9 +56,10 @@ except ImportError as e:
 
 # --- Local Module Imports ---
 try:
-    from qkd_simulation import simulate_bb84, create_qkd_report_pdf
+    # Assuming create_qkd_report_pdf is the correct name in qkd_simulation.py
+    from qkd_simulation import simulate_bb84, create_qkd_report_pdf as create_qkd_simulation_report
     from fraud_detection import detect_fraud
-    from pdf_generator import create_qkd_report as create_txn_report_pdf
+    from pdf_generator import create_qkd_report as create_transaction_report # Renamed for clarity
     from risk_simulation import run_risk_analysis
     from ml_fraud_model import load_model as load_ml_model, MODEL_FILENAME, FEATURES_FILENAME
 except ImportError as e:
@@ -77,7 +78,7 @@ app = Flask(__name__)
 # --- Configuration ---
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'a_very_insecure_default_secret_key_32bytes_')
 if app.secret_key == 'a_very_insecure_default_secret_key_32bytes_':
-    print("\n" + "="*60 + "\nWARNING: Using default FLASK_SECRET_KEY! Set environment variable.\n" + "="*60 + "\n")
+    print("\n" + "="*60 + "\nWARNING: Using default FLASK_SECRET_KEY! Set a proper environment variable.\n" + "="*60 + "\n")
 
 app.config.update(
     WTF_CSRF_ENABLED=True,
@@ -105,41 +106,19 @@ app.config['INITIAL_BALANCE'] = INITIAL_BALANCE
 # --- Token Serializer Setup ---
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# --- Setup Logging (with File Handler) ---
-# CHANGE LEVEL TO logging.DEBUG TEMPORARILY FOR VERBOSE OUTPUT
-log_level = logging.INFO
-log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s [%(name)s:%(lineno)d]')
-
-# Console Handler (set level via basicConfig)
-logging.basicConfig(level=log_level, format='%(asctime)s [%(levelname)s] %(message)s [%(name)s:%(lineno)d]')
-
-# File Handler (Rotating)
-log_dir = os.path.join(os.path.dirname(__file__), 'logs')
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, 'qsb_app.log')
-# Rotate logs: 3 files, max 5MB each
-file_handler = RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=3)
-file_handler.setFormatter(log_formatter)
-file_handler.setLevel(log_level) # Set file handler level
-
-# Add file handler to the root logger
-logging.getLogger('').addHandler(file_handler)
-
-# Reduce noise from libraries
+# --- Setup Logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s [%(name)s:%(lineno)d]')
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
 logging.getLogger('mysql.connector').setLevel(logging.WARNING)
-logging.getLogger('qiskit').setLevel(logging.WARNING)
-
-logging.info("--- Application Logging Initialized (Console & File) ---")
-# --- End Logging Setup ---
-
 
 # --- Load ML Model AT STARTUP ---
+# Directly call the loading function when the app module is loaded
 logging.info("Attempting to load ML Fraud Model at app startup...")
 if not load_ml_model():
     logging.critical(f"ML FRAUD DETECTION MODEL FAILED TO LOAD. Check logs and ensure '{MODEL_FILENAME}' and '{FEATURES_FILENAME}' exist. Fraud detection may be limited.")
 else:
     logging.info("ML model loaded successfully at app startup.")
+# --- End Load ML Model ---
 
 
 # --- Forms Definition ---
@@ -167,7 +146,6 @@ class ResetPasswordForm(FlaskForm):
 
 # --- Database Helper Functions ---
 def get_db_connection():
-    logging.debug("Attempting to get DB connection...")
     try:
         conn = mysql.connector.connect(**MYSQL_CONFIG)
         if conn.is_connected(): logging.debug("DB connection successful."); return conn
@@ -180,9 +158,8 @@ def close_db_connection(conn):
         except MySQLError as e: logging.error(f"Error closing DB connection: {e}")
 
 def get_accounts_data(customer_id_filter=None):
-    logging.debug(f"Fetching accounts data (Filter: {customer_id_filter})...")
     accounts = []; conn = get_db_connection(); cursor = None
-    if not conn: return accounts # Error logged in get_db_connection
+    if not conn: return accounts
     try:
         cursor = conn.cursor(dictionary=True)
         sql = "SELECT a.account_id, c.customer_name, a.balance, a.customer_id FROM accounts a JOIN customers c ON a.customer_id = c.customer_id"
@@ -190,28 +167,24 @@ def get_accounts_data(customer_id_filter=None):
         if customer_id_filter is not None: sql += " WHERE a.customer_id = %s"; params.append(customer_id_filter)
         sql += " ORDER BY a.account_id"
         cursor.execute(sql, tuple(params)); raw_accounts = cursor.fetchall()
-        logging.debug(f"Found {len(raw_accounts)} raw account(s).")
         for acc in raw_accounts:
             try:
                 balance_val = acc.get('balance'); acc['balance'] = Decimal(balance_val) if balance_val is not None else Decimal('0.00')
                 if all(k in acc for k in ('account_id', 'customer_name', 'customer_id')): accounts.append(acc)
                 else: logging.warning(f"Skipping account due to missing keys: {acc.get('account_id', 'N/A')}")
             except (InvalidOperation, TypeError) as e: logging.warning(f"Skipping account {acc.get('account_id')} due to invalid balance format ('{balance_val}'): {e}")
-    except MySQLError as e: logging.error(f"Error fetching accounts: {e}", exc_info=True); flash("Error loading account data.", "error")
+    except MySQLError as e: logging.error(f"Error fetching accounts: {e}"); flash("Error loading account data.", "error")
     finally:
         if cursor: cursor.close(); close_db_connection(conn)
-    logging.debug(f"Returning {len(accounts)} processed account(s).")
     return accounts
 
 def get_user_by_email(email):
-    logging.debug(f"Fetching user by email: {email}")
     conn = get_db_connection(); cursor = None; user = None
     if not conn: return None
     try: cursor = conn.cursor(dictionary=True); cursor.execute("SELECT customer_id, customer_name, email, password_hash FROM customers WHERE email = %s", (email,)); user = cursor.fetchone()
     except MySQLError as e: logging.error(f"DB Error getting user by email ({email}): {e}")
     finally:
         if cursor: cursor.close(); close_db_connection(conn)
-    logging.debug(f"User lookup result for {email}: {'Found' if user else 'Not Found'}")
     return user
 
 def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value=None, fraud_reason=None):
@@ -224,10 +197,10 @@ def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value
         log_conn = get_db_connection();
         if not log_conn: raise ConnectionError("DB Connection failed for logging failed transaction")
         log_cursor = log_conn.cursor()
-        log_sql = "INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, qber_value, is_flagged, fraud_reason, encrypted_confirmation) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+        log_sql = "INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, qber_value, is_flagged, fraud_reason, encrypted_confirmation, iv) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
         qber_db_val = qber_value if isinstance(qber_value, (float, int)) and qber_value >= 0 else None
         is_flagged = bool(fraud_reason)
-        log_values = (sender_id_val, receiver_id_val, amount_str, failed_status, qber_db_val, is_flagged, fraud_reason, None)
+        log_values = (sender_id_val, receiver_id_val, amount_str, failed_status, qber_db_val, is_flagged, fraud_reason, None, None) # No IV
         log_cursor.execute(log_sql, log_values); log_conn.commit()
         logging.info(f"Failed attempt logged. Status: {failed_status}, Flagged: {is_flagged}, Reason: {fraud_reason}")
      except (MySQLError, ConnectionError) as log_err:
@@ -281,14 +254,12 @@ def clear_qkd_session_log():
 
 @app.route('/')
 def home_redirect():
-    logging.debug("Routing '/'")
     if g.get('user'): return redirect(url_for('index'))
     return redirect(url_for('login'))
 
 @app.route('/index')
 @login_required
 def index():
-    logging.debug(f"Rendering index page for user {g.user['id']}")
     user_id = g.user['id']
     user_accounts = get_accounts_data(customer_id_filter=user_id)
     all_accounts = get_accounts_data()
@@ -298,103 +269,104 @@ def index():
     flagged_transactions = get_flagged_transactions(user_id, limit=5)
     show_fraud_alert = bool(flagged_transactions)
     last_transfer_outcome = session.pop('last_transfer_outcome', None)
-    if last_transfer_outcome: logging.debug(f"Displaying last transfer outcome: {last_transfer_outcome.get('status')}")
     return render_template('index.html', user_accounts=user_accounts, receiver_accounts=receiver_accounts, show_fraud_alert=show_fraud_alert, last_transfer_outcome=last_transfer_outcome)
 
+# --- UPDATED register_customer with corrected transaction handling ---
 @app.route('/register', methods=['GET', 'POST'])
 def register_customer():
-    logging.debug(f"Entered register_customer route (Method: {request.method})")
     if g.user: return redirect(url_for('index'))
     form = RegistrationForm()
     if form.validate_on_submit():
         customer_name = form.customer_name.data.strip(); email = form.email.data.strip().lower(); password = form.password.data
-        logging.info(f"Registration attempt for email: {email}")
         conn = get_db_connection(); cursor = None
-        needs_rollback = False
+        needs_rollback = False # Flag to track if rollback is needed
         if not conn:
             flash("Database connection error.", "error")
             return render_template('register.html', form=form)
         try:
             cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT customer_id FROM customers WHERE customer_name = %s OR email = %s", (customer_name, email))
+            # Check for existing user first
+            cursor.execute("SELECT customer_id, customer_name, email FROM customers WHERE customer_name = %s OR email = %s", (customer_name, email))
             existing_user = cursor.fetchone()
             if existing_user:
-                cursor.execute("SELECT customer_id FROM customers WHERE email = %s", (email,))
-                if cursor.fetchone(): form.email.errors.append(f"Email already registered.")
-                else: form.customer_name.errors.append(f"Name already exists.")
+                if existing_user.get('customer_name') == customer_name: form.customer_name.errors.append(f"Name already exists.")
+                elif existing_user.get('email') == email: form.email.errors.append(f"Email already registered.")
+                else: flash("Registration conflict.", "error")
+                # No transaction started, just close and render
                 if cursor: cursor.close(); close_db_connection(conn)
                 return render_template('register.html', form=form)
 
-            needs_rollback = True
+            # --- Start Insertion Logic ---
+            # Transaction might implicitly start here. Rely on commit/rollback.
+            needs_rollback = True # Mark that potential changes are starting
+
             hashed_pw = generate_password_hash(password)
-            logging.debug("Inserting new customer...")
             cursor.execute("INSERT INTO customers (customer_name, email, password_hash) VALUES (%s, %s, %s)", (customer_name, email, hashed_pw)); customer_id = cursor.lastrowid
             if not customer_id: raise MySQLError("Failed customer insert.")
-            logging.debug(f"Inserted customer {customer_id}. Inserting account...")
+            logging.debug(f"Inserted customer {customer_id}")
+
             cursor.execute("INSERT INTO accounts (customer_id, balance) VALUES (%s, %s)", (customer_id, str(app.config['INITIAL_BALANCE']))); account_id = cursor.lastrowid
             if not account_id: raise MySQLError("Failed account insert.")
-            logging.debug(f"Inserted account {account_id} for customer {customer_id}. Committing...")
-            conn.commit(); needs_rollback = False
+            logging.debug(f"Inserted account {account_id} for customer {customer_id}")
+
+            conn.commit() # Commit successful inserts
+            needs_rollback = False # Don't rollback after successful commit
             logging.info(f"Registered {customer_name} ({email}) - CustID {customer_id}, AccID {account_id}")
             flash(f"Customer '{customer_name}' registered! Please login.", "success")
+
+            # Close cursor and connection before redirecting
             if cursor: cursor.close(); close_db_connection(conn)
             return redirect(url_for('login'))
 
         except MySQLError as e:
             logging.error(f"DB error during registration: {e}", exc_info=True)
             flash("DB registration error.", "error")
+            # Rollback will be attempted in finally block if needs_rollback is True
         except Exception as e:
              logging.error(f"Unexpected registration error: {e}", exc_info=True)
              flash("Unexpected registration error.", "error")
+             # Rollback will be attempted in finally block if needs_rollback is True
         finally:
+            # Ensure rollback happens ONLY if needed and connection is closed
             if conn and conn.is_connected():
-                if needs_rollback:
+                if needs_rollback: # Only rollback if commit wasn't reached or failed
                     try: conn.rollback(); logging.warning(f"Transaction rolled back due to registration error.")
                     except MySQLError as rb_err: logging.error(f"Rollback attempt failed during registration error handling: {rb_err}")
-                if cursor: cursor.close()
-                close_db_connection(conn)
-        logging.debug("Exiting register_customer route after error or validation failure.")
-        return render_template('register.html', form=form)
-    logging.debug("Exiting register_customer route (GET request or initial validation failure).")
-    return render_template('register.html', form=form)
+                if cursor: cursor.close() # Close cursor before connection
+                close_db_connection(conn) # Always close connection
 
+        # Re-render form if validation failed OR if try block raised an exception
+        return render_template('register.html', form=form)
+    # Render form for initial GET request
+    return render_template('register.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    logging.debug(f"Entered login route (Method: {request.method})")
     if g.user: return redirect(url_for('index'))
     form = LoginForm()
     if form.validate_on_submit():
         email = form.email.data.strip().lower(); password = form.password.data
-        logging.info(f"Login attempt for email: {email}")
         customer = get_user_by_email(email)
         if customer and check_password_hash(customer.get('password_hash',''), password):
             session.clear(); session['user_id'] = customer['customer_id']; session['user_name'] = customer['customer_name']; session['user_email'] = customer['email']; session.permanent = True
-            logging.info(f"User {customer['customer_name']} (ID: {customer['customer_id']}) logged in successfully.")
+            logging.info(f"User {customer['customer_name']} (ID: {customer['customer_id']}) logged in.")
             flash(f"Welcome back, {customer['customer_name']}!", "success")
             next_page = request.args.get('next')
-            if next_page and next_page.startswith('/') and not next_page.startswith('//') and ' ' not in next_page:
-                logging.debug(f"Redirecting logged-in user to 'next' page: {next_page}")
-                return redirect(next_page)
-            else:
-                logging.debug("Redirecting logged-in user to index.")
-                return redirect(url_for('index'))
+            if next_page and next_page.startswith('/') and not next_page.startswith('//') and ' ' not in next_page: return redirect(next_page)
+            else: return redirect(url_for('index'))
         else: logging.warning(f"Failed login attempt for email: {email}"); flash("Invalid email or password.", "error")
-    logging.debug("Exiting login route (GET or failed validation).")
     return render_template('login.html', form=form)
 
 @app.route('/logout')
 @login_required
 def logout():
     user_name_for_log = g.user.get('name', 'N/A'); user_id_for_log = g.user.get('id', 'N/A')
-    logging.debug(f"Logging out user {user_name_for_log} (ID: {user_id_for_log})")
     clear_qkd_session_log(); session.clear()
     flash("You have been logged out.", "info"); logging.info(f"User {user_name_for_log} (ID: {user_id_for_log}) logged out.")
     return redirect(url_for('login'))
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
-    logging.debug(f"Entered forgot_password route (Method: {request.method})")
     if g.user: return redirect(url_for('index'))
     form = ForgotPasswordForm()
     if form.validate_on_submit():
@@ -404,15 +376,14 @@ def forgot_password():
             try:
                 token = serializer.dumps(email, salt='password-reset-salt')
                 reset_url = url_for('reset_password', token=token, _external=True)
-                logging.info(f"Generated reset URL for {email}")
                 print("\n" + "*" * 80 + f"\nSIMULATING PASSWORD RESET EMAIL:\nTo: {email}\nSubject: Reset Your QSB Password\nBody:\n Hello {user.get('customer_name', '')},\n Reset link (expires 1hr):\n {reset_url}\n Ignore if not requested.\n" + "*" * 80 + "\n")
             except Exception as e: logging.error(f"ERROR during token/URL generation for {email}: {e}", exc_info=True)
         flash('If an account exists, password reset instructions sent.', 'info'); return redirect(url_for('login'))
     return render_template('forgot_password.html', form=form)
 
+# --- UPDATED reset_password with corrected transaction handling ---
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
-    logging.debug(f"Entered reset_password route (Method: {request.method})")
     if g.user: flash("You are already logged in.", "info"); return redirect(url_for('index'))
     email = None
     try: email = serializer.loads(token, salt='password-reset-salt', max_age=3600)
@@ -423,25 +394,29 @@ def reset_password(token):
     form = ResetPasswordForm()
     if form.validate_on_submit():
         new_password_hash = generate_password_hash(form.password.data); conn = get_db_connection(); cursor = None; updated = False
-        needs_rollback = False
+        needs_rollback = False # Flag for rollback
         if not conn: flash('DB error.', 'error'); return render_template('reset_password.html', form=form, token=token)
         else:
             try:
+                # Do not explicitly start transaction unless needed; rely on commit/rollback
                 cursor = conn.cursor()
-                needs_rollback = True
-                logging.debug(f"Attempting password update for {email}")
+                needs_rollback = True # Assume rollback needed unless commit succeeds
+
                 cursor.execute("UPDATE customers SET password_hash = %s WHERE email = %s", (new_password_hash, email))
                 if cursor.rowcount == 1:
-                    conn.commit(); updated = True; needs_rollback = False
+                    conn.commit(); updated = True; needs_rollback = False # Success!
                     logging.info(f"Password updated for {email}")
                 else:
+                    # Rollback handled in finally
                     logging.error(f"Password update failed (rowcount={cursor.rowcount}) for {email}."); flash('Update failed.', 'error')
             except MySQLError as e:
                  logging.error(f"DB Error resetting password for {email}: {e}", exc_info=True)
                  flash('DB error during update.', 'error')
+                 # Rollback handled in finally
             except Exception as e:
                  logging.error(f"Unexpected error resetting password for {email}: {e}", exc_info=True)
                  flash('Unexpected error during update.', 'error')
+                 # Rollback handled in finally
             finally:
                  if conn and conn.is_connected():
                      if needs_rollback:
@@ -453,24 +428,27 @@ def reset_password(token):
     return render_template('reset_password.html', form=form, token=token)
 
 
-# --- Transfer Route ---
+# --- Transfer Route (UPDATED for ML Fraud Detection & Corrected Rollback) ---
 @app.route('/transfer', methods=['POST'])
 @login_required
 def transfer_funds():
-    logging.debug("Entered transfer_funds route")
+    """Handles fund transfer: Runs QKD, validates, detects fraud (ML), logs & updates balances."""
     # 1. Input Extraction & Basic Validation
     sender_id_str = request.form.get('sender_account_id'); receiver_id_str = request.form.get('receiver_account_id'); amount_str = request.form.get('amount')
     simulate_eve_checked = 'simulate_eve' in request.form
     sender_id = None; receiver_id = None; amount = None;
     logged_in_user_id = g.user['id']
-    session.pop('last_transfer_outcome', None); last_outcome = {'timestamp': datetime.datetime.now().isoformat()}
+
+    session.pop('last_transfer_outcome', None)
+    last_outcome = {'timestamp': datetime.datetime.now().isoformat()}
+
     try:
         if not sender_id_str: raise ValueError("Sender account must be selected.")
-        sender_id = int(sender_id_str); logging.debug(f"Sender ID: {sender_id}")
+        sender_id = int(sender_id_str)
         if not receiver_id_str: raise ValueError("Receiver account must be selected.")
-        receiver_id = int(receiver_id_str); logging.debug(f"Receiver ID: {receiver_id}")
+        receiver_id = int(receiver_id_str)
         if not amount_str: raise ValueError("Transfer amount must be entered.")
-        amount = Decimal(amount_str.strip()); logging.debug(f"Amount: {amount}")
+        amount = Decimal(amount_str.strip());
         if sender_id == receiver_id: raise ValueError("Sender and Receiver accounts cannot be the same.")
         if amount <= 0: raise ValueError("Transfer amount must be positive.")
         last_outcome.update({'amount': f"{amount:.2f}", 'sender_id': sender_id, 'receiver_id': receiver_id})
@@ -485,17 +463,21 @@ def transfer_funds():
     qber_threshold = current_app.config.get('QBER_THRESHOLD', 0.15); num_qubits = QKD_NUM_QUBITS; eve_rate = 0.25
     qkd_fernet_key = None; simulation_result = {}; qber = -1.0; qkd_failure_reason = None
     failed_status_for_log = "UNKNOWN_QKD_FAIL"; fraud_reason_for_log = None
-    logging.debug("Calling QKD simulation...")
+
     try:
         simulation_result = simulate_bb84(n_qubits=num_qubits, simulate_eve=simulate_eve_checked, qber_threshold=qber_threshold, eve_interception_rate=eve_rate if simulate_eve_checked else 0.0)
-        session[f'last_qkd_log_{logged_in_user_id}'] = simulation_result; session.modified = True; last_outcome['qkd_log_stored'] = True
-        logging.debug(f"QKD simulation returned: QBER={simulation_result.get('qber')}, KeyLength={simulation_result.get('final_key_length')}, EveDetected={simulation_result.get('eve_detected')}")
-        final_key_binary = simulation_result.get('final_key_binary'); qber = simulation_result.get('qber', -1.0); eve_detected_by_sim = simulation_result.get('eve_detected', False)
-        qber_display = f"{qber:.4f}" if qber >= 0 else ('N/A' if qber == -1.0 else f"ERR_{int(abs(qber))}"); last_outcome['qber'] = qber_display
+        session[f'last_qkd_log_{logged_in_user_id}'] = simulation_result; session.modified = True
+        last_outcome['qkd_log_stored'] = True
+        final_key_binary = simulation_result.get('final_key_binary'); qber = simulation_result.get('qber', -1.0)
+        eve_detected_by_sim = simulation_result.get('eve_detected', False)
+        qber_display = f"{qber:.4f}" if qber >= 0 else ('N/A' if qber == -1.0 else f"ERR_{int(abs(qber))}")
+        last_outcome['qber'] = qber_display
+
         if qber < 0: qkd_failure_reason = f"QKD simulation/QBER failed (Code: {qber})."; failed_status_for_log = f"QKD_ERROR_{int(abs(qber))}"
         elif eve_detected_by_sim: qkd_failure_reason = f"Eavesdropping Detected / High QBER ({qber_display} > {qber_threshold:.2f})."; failed_status_for_log = "QBER_THRESHOLD_EXCEEDED"; fraud_reason_for_log = f"QKD Alert: {qkd_failure_reason}"
         elif not final_key_binary: qkd_failure_reason = f"Insufficient key bits generated (QBER OK: {qber_display})."; failed_status_for_log = "KEY_LENGTH_FAIL"
         if qkd_failure_reason: raise ValueError(f"QKD Failed: {qkd_failure_reason}")
+
         logging.info(f"QKD Succeeded (QBER: {qber_display}). Deriving Fernet key...")
         key_hash_bytes = hashlib.sha256(final_key_binary.encode('utf-8')).digest(); qkd_fernet_key = base64.urlsafe_b64encode(key_hash_bytes)
     except ValueError as qkd_fail_e:
@@ -512,15 +494,16 @@ def transfer_funds():
         session['last_transfer_outcome'] = last_outcome; session.modified = True; return redirect(url_for('index'))
 
     # 3. Database Transaction & Classical/ML Checks
-    conn = None; cursor = None; failed_status = "UNKNOWN_DB_FAIL"; fraud_check_result = {'is_fraudulent': False, 'reason': None, 'ml_score': -1.0}; needs_rollback = False
+    conn = None; cursor = None;
+    failed_status = "UNKNOWN_DB_FAIL"; fraud_check_result = {'is_fraudulent': False, 'reason': None, 'ml_score': -1.0}
+    needs_rollback = False # Flag for rollback logic
     try:
         if not qkd_fernet_key: raise ValueError("Internal Error: QKD key missing.")
         conn = get_db_connection();
         if not conn: raise ConnectionError("Database connection failed before transaction.")
-        # conn.start_transaction(); # Use commit/rollback on connection
+        # conn.start_transaction(); # Rely on implicit transaction / commit / rollback
         cursor = conn.cursor(dictionary=True, buffered=True);
-        needs_rollback = True
-        logging.debug("Starting DB transaction for transfer.")
+        needs_rollback = True # Mark transaction potentially started
 
         # 3a. Auth & Pre-Transfer DB Checks
         cursor.execute("SELECT customer_id, balance FROM accounts WHERE account_id = %s FOR UPDATE", (sender_id,)); sender_info = cursor.fetchone()
@@ -531,22 +514,24 @@ def transfer_funds():
         cursor.execute("SELECT a.account_id, c.customer_name FROM accounts a JOIN customers c ON a.customer_id = c.customer_id WHERE a.account_id = %s", (receiver_id,)); receiver_info = cursor.fetchone()
         if not receiver_info: raise ValueError(f"Receiver account {receiver_id} not found.")
         receiver_username = receiver_info['customer_name']; last_outcome['receiver_name'] = receiver_username
-        logging.debug(f"DB Checks Passed: Sender Bal: {sender_balance}, Receiver: {receiver_username}")
 
-        # 3b. Fraud Detection Call
+        # 3b. Fraud Detection Call (Using ML via updated fraud_detection.py)
         logging.info("Running ML-based fraud detection...")
         cursor.execute("SELECT amount, timestamp FROM qkd_transaction_log WHERE sender_account_id = %s ORDER BY timestamp DESC LIMIT 5", (sender_id,))
-        history_raw = cursor.fetchall(); history_for_ml = []
+        history_raw = cursor.fetchall()
+        history_for_ml = []
         for r in history_raw:
-             try:
-                 hist_amount = Decimal(r['amount']) if r.get('amount') is not None else Decimal('0.00'); hist_ts = r.get('timestamp');
+             try: # Safely process history records
+                 hist_amount = Decimal(r['amount']) if r.get('amount') is not None else Decimal('0.00')
+                 hist_ts = r.get('timestamp');
                  if isinstance(hist_ts, datetime.datetime): history_for_ml.append({'amount': hist_amount, 'timestamp': hist_ts})
              except Exception as hist_e: logging.warning(f"Skipping history record for ML preprocessing: {hist_e}")
         current_txn_for_fraud = {'amount': amount, 'recipient_username': receiver_username, 'timestamp': datetime.datetime.now()}
         fraud_config = {'blacklist': current_app.config.get('FRAUD_BLACKLIST', set())}
         fraud_check_result = detect_fraud(current_transaction=current_txn_for_fraud, user_transaction_history=history_for_ml, **fraud_config)
-        last_outcome['fraud_check'] = fraud_check_result; logging.debug(f"Fraud detection result: {fraud_check_result}")
+        last_outcome['fraud_check'] = fraud_check_result
 
+        # Determine overall QKD status based on fraud result
         qkd_status = "SECURED_FLAGGED" if fraud_check_result['is_fraudulent'] else "SECURED"
         if fraud_check_result['is_fraudulent']: logging.warning(f"Fraud Alert for Txn: {fraud_check_result['reason']}")
         else: logging.info("Fraud check passed.")
@@ -557,7 +542,6 @@ def transfer_funds():
         try:
             f = Fernet(qkd_fernet_key); encrypted_confirmation_bytes = f.encrypt(msg_to_encrypt.encode('utf-8')); encrypted_confirmation_b64 = encrypted_confirmation_bytes.decode('utf-8')
             last_outcome['encrypted_sample'] = encrypted_confirmation_b64[:60] + ('...' if len(encrypted_confirmation_b64) > 60 else '')
-            logging.debug("Encryption successful.")
         except InvalidToken: failed_status = "ENCRYPTION_KEY_ERROR"; raise ValueError("Internal encryption error.")
         except Exception as fernet_err: failed_status = "ENCRYPTION_FAIL"; raise ValueError(f"Encryption failed: {fernet_err}")
 
@@ -570,53 +554,53 @@ def transfer_funds():
         if cursor.rowcount != 1: raise MySQLError(f"Sender update failed for {sender_id}")
         cursor.execute("UPDATE accounts SET balance = %s WHERE account_id = %s", (str(new_receiver_balance), receiver_id));
         if cursor.rowcount != 1: raise MySQLError(f"Receiver update failed for {receiver_id}")
-        logging.debug(f"Balances updated: Sender={new_sender_balance}, Receiver={new_receiver_balance}")
 
         # 3e. Log Successful Transaction
         logging.info(f"Logging successful transaction to DB with status: {qkd_status}")
-        log_sql = "INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, qber_value, is_flagged, fraud_reason) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+        log_sql = "INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
         log_qber_db = qber if qber is not None and qber >= 0 else None
-        log_values = (sender_id, receiver_id, str(amount), qkd_status, encrypted_confirmation_b64, log_qber_db, fraud_check_result['is_fraudulent'], fraud_check_result['reason'])
+        log_values = (sender_id, receiver_id, str(amount), qkd_status, encrypted_confirmation_b64, None, log_qber_db, fraud_check_result['is_fraudulent'], fraud_check_result['reason'])
         cursor.execute(log_sql, log_values); log_id = cursor.lastrowid
         if not log_id: raise MySQLError("Failed log insert.")
-        last_outcome['log_id'] = log_id; logging.debug(f"Transaction logged with ID: {log_id}")
+        last_outcome['log_id'] = log_id; logging.info(f"Transaction logged with Log ID: {log_id}")
 
         # 3f. Commit Transaction
-        logging.info("Attempting transaction commit...")
-        conn.commit(); needs_rollback = False
+        conn.commit(); # Commit successful operations
+        needs_rollback = False # Mark as committed
         logging.info("Database transaction committed.")
         last_outcome['status'] = 'Success'; last_outcome['qkd_status_msg'] = qkd_status.replace("_", " ")
 
         flash_msg = f"Transfer successful! Log ID: {log_id}. Secured (QBER: {qber_display})."
         flash_category = "success"
         if fraud_check_result['is_fraudulent']:
-            short_reason = fraud_check_result.get('reason', "Flagged").split(';')[0]
+            short_reason = fraud_check_result.get('reason', "Flagged").split(';')[0] # Use first reason for flash
             flash_msg = f"Transfer successful (Log ID: {log_id}), but FLAGED: {short_reason}"
             flash_category = "warning"
         flash(flash_msg, flash_category)
 
-    except (MySQLError, ValueError, InvalidOperation, ConnectionError, AssertionError) as e:
+    except (MySQLError, ValueError, InvalidOperation, ConnectionError, AssertionError) as e: # Added AssertionError
         if failed_status == "UNKNOWN_DB_FAIL":
-            if isinstance(e, (ValueError, AssertionError)): failed_status = "VALIDATION_FAIL"
+            if isinstance(e, (ValueError, AssertionError)): failed_status = "VALIDATION_FAIL" # Catch validation/assert errors
             elif isinstance(e, ConnectionError): failed_status = "DB_CONNECTION_ERROR"
-            else: failed_status = "DB_TRANSACTION_ERROR"
+            else: failed_status = "DB_TRANSACTION_ERROR" # Catch MySQLError
         logging.error(f"Transaction Error ({failed_status}) for User {logged_in_user_id}: {e}", exc_info=True)
         last_outcome.update({'status': 'Failed', 'reason': str(e), 'qkd_status_msg': failed_status.replace("_", " ")})
         # Rollback handled in finally
         if failed_status == "VALIDATION_FAIL": flash(f"Transfer Failed: {e}", "error")
         else: flash("Transfer Failed due to a system error.", "error")
+        # Log failure after handling exception
         log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value=qber if qber >=0 else None, fraud_reason=f"Txn Error: {str(e)}")
     finally:
+        # --- Consistent Rollback/Close Logic ---
         if conn and conn.is_connected():
-            if needs_rollback:
-                logging.debug("Attempting transaction rollback...")
+            if needs_rollback: # Check flag set inside try block
                 try: conn.rollback(); logging.info("Transaction rolled back due to error.")
-                except MySQLError as rb_err: logging.error(f"Rollback attempt FAILED during transfer error handling: {rb_err}")
-            if cursor: cursor.close()
-            close_db_connection(conn)
+                except MySQLError as rb_err: logging.error(f"Rollback attempt failed during transfer error handling: {rb_err}")
+            if cursor: cursor.close() # Close cursor first
+            close_db_connection(conn) # Then close connection
+        # --- End Correction ---
 
     # 4. Redirect to Index with Outcome
-    logging.debug(f"Exiting transfer_funds route. Outcome: {last_outcome.get('status')}")
     session['last_transfer_outcome'] = last_outcome; session.modified = True;
     return redirect(url_for('index'))
 
@@ -625,7 +609,6 @@ def transfer_funds():
 @app.route('/history', methods=['GET'])
 @login_required
 def history():
-    logging.debug(f"Rendering history page for user {g.user['id']}")
     user_id = g.user['id']; display_log = []; conn = get_db_connection(); cursor = None
     if not conn: flash("Database error loading history.", "error"); return render_template('history.html', log_entries=[])
     try:
@@ -654,53 +637,112 @@ def history():
 
 
 # --- Info/Feature Routes ---
+
+# --- UPDATED qkd_page with robust error handling for DB query ---
 @app.route('/qkd')
 @login_required
 def qkd_page():
-    logging.debug(f"Rendering QKD page for user {g.user['id']}")
-    user_id = g.user['id']; simulation_log = session.get(f'last_qkd_log_{user_id}', None)
-    qber_history_labels = []; qber_history_values = []; conn = get_db_connection(); cursor = None; history_limit = 10
+    user_id = g.user['id']
+    simulation_log = session.get(f'last_qkd_log_{user_id}', None) # Get log from session
+
+    # Initialize lists for chart data
+    qber_history_labels = []
+    qber_history_values = []
+    conn = get_db_connection() # Attempt DB connection
+    cursor = None
+    history_limit = 10
+
     if conn:
         try:
              cursor = conn.cursor(dictionary=True)
-             sql = """ SELECT log_id, qber_value FROM qkd_transaction_log l LEFT JOIN accounts s ON l.sender_account_id = s.account_id LEFT JOIN accounts r ON l.receiver_account_id = r.account_id
-                       WHERE (s.customer_id = %s OR r.customer_id = %s) AND l.qber_value IS NOT NULL AND l.qber_value >= 0 ORDER BY l.timestamp DESC LIMIT %s """
-             cursor.execute(sql, (user_id, user_id, history_limit)); history_data = cursor.fetchall(); history_data.reverse()
-             for entry in history_data: qber_history_labels.append(f"Log {entry['log_id']}"); qber_history_values.append(round((entry['qber_value'] * 100), 2))
-             logging.info(f"Fetched {len(qber_history_labels)} QBER history entries for user {user_id}.")
+             # Fetch QBER history from DB
+             sql = """ SELECT log_id, qber_value
+                       FROM qkd_transaction_log l
+                       LEFT JOIN accounts s ON l.sender_account_id = s.account_id
+                       LEFT JOIN accounts r ON l.receiver_account_id = r.account_id
+                       WHERE (s.customer_id = %s OR r.customer_id = %s)
+                         AND l.qber_value IS NOT NULL AND l.qber_value >= 0
+                       ORDER BY l.timestamp DESC LIMIT %s """
+             cursor.execute(sql, (user_id, user_id, history_limit))
+             history_data = cursor.fetchall()
+             history_data.reverse() # Oldest first for chart
+
+             # Process fetched data
+             for entry in history_data:
+                 # Ensure keys exist before accessing
+                 log_id = entry.get('log_id')
+                 qber_val = entry.get('qber_value')
+                 if log_id is not None and qber_val is not None:
+                     label = f"Log {log_id}"
+                     # Ensure qber_val is treated as float before multiplying
+                     try:
+                         qber_percent = float(qber_val) * 100
+                         qber_history_labels.append(label)
+                         qber_history_values.append(round(qber_percent, 2))
+                     except (TypeError, ValueError) as conv_err:
+                          logging.warning(f"Could not convert QBER value '{qber_val}' to float for chart: {conv_err}")
+                 else:
+                      logging.warning(f"Skipping QBER history entry due to missing log_id or qber_value: {entry}")
+
         except MySQLError as e:
+             # Log DB error but don't crash the page
              logging.warning(f"Could not fetch QBER history for user {user_id}: {e}")
-             flash("Could not load QBER history from database.", "warning")
-        except Exception as e:
-             logging.error(f"Unexpected error fetching QBER history for user {user_id}: {e}", exc_info=True)
-             flash("An error occurred while loading QBER history.", "warning")
+             # Use placeholder data if DB fetch fails AFTER connection succeeded
+             qber_history_labels = ['DB Error']; qber_history_values = [0]
         finally:
-             if cursor: cursor.close(); close_db_connection(conn)
+             # Ensure cursor/connection closure
+             if cursor: cursor.close()
+             close_db_connection(conn)
     else:
-         logging.error(f"DB connection failed while trying to fetch QBER history for user {user_id}.")
-         flash("Database connection error loading QBER history.", "error")
+         # DB connection itself failed
+         logging.error(f"DB connection failed when trying to fetch QBER history for user {user_id}")
+         # Use placeholder data if DB connection failed
+         qber_history_labels = ['DB Down']; qber_history_values = [0]
 
-    # Use placeholder data if DB fetch fails or returns nothing
+    # Ensure lists are never empty for Jinja/JS, use placeholder if needed
     if not qber_history_labels:
-         logging.debug("Using placeholder QBER history data.")
-         qber_history_labels = ['Run 1', 'Run 2', 'Run 3', 'Run 4', 'Run 5'];
-         qber_history_values = [1.2, 0.8, 15.3, 0.5, 2.1]
+        qber_history_labels = ['No History']
+        qber_history_values = [0]
 
-    return render_template('qkd.html', simulation_log=simulation_log, QBER_THRESHOLD=current_app.config.get('QBER_THRESHOLD'), qber_history_labels=qber_history_labels, qber_history_values=qber_history_values)
+    # Render the template, passing all required data
+    return render_template('qkd.html',
+                           simulation_log=simulation_log, # Pass the log from session
+                           QBER_THRESHOLD=current_app.config.get('QBER_THRESHOLD'), # Pass threshold
+                           qber_history_labels=qber_history_labels, # Pass labels (real or placeholder)
+                           qber_history_values=qber_history_values) # Pass values (real or placeholder)
 
+# --- NEW: Route to download QKD simulation PDF report ---
 @app.route('/qkd/report/download')
 @login_required
 def download_qkd_report():
-    user_id = g.user['id']; simulation_log = session.get(f'last_qkd_log_{user_id}')
-    if not simulation_log: flash("No QKD simulation data found in session.", "warning"); return redirect(url_for('qkd_page'))
-    logging.info(f"User {user_id} attempting QKD simulation report download.")
+    user_id = g.user['id']
+    simulation_log = session.get(f'last_qkd_log_{user_id}') # Get log data from session
+    if not simulation_log:
+        flash("No QKD simulation data found in session to generate report.", "warning")
+        return redirect(url_for('qkd_page')) # Redirect if no data
+
+    logging.info(f"User {user_id} attempting to download QKD simulation report.")
     try:
-        pdf_bytes = create_qkd_report_pdf(simulation_log) # Uses qkd_simulation.py
-        if not pdf_bytes: flash("Failed to generate QKD PDF report.", "danger"); logging.error(f"create_qkd_report_pdf returned None for user {user_id}"); return redirect(url_for('qkd_page'))
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S"); filename = f"QKD_Simulation_Report_{timestamp}.pdf"
-        logging.info(f"Serving QKD Sim PDF report '{filename}' to user {user_id}.")
-        return Response(pdf_bytes, mimetype="application/pdf", headers={"Content-Disposition": f"attachment;filename={filename}"})
-    except Exception as e: logging.error(f"Error generating QKD PDF for user {user_id}: {e}", exc_info=True); flash("Error preparing QKD report.", "danger"); return redirect(url_for('qkd_page'))
+        # Call the PDF generation function from qkd_simulation module
+        pdf_bytes = create_qkd_simulation_report(simulation_log) # Use correct function name
+        if not pdf_bytes:
+            logging.error(f"QKD PDF generation returned None for user {user_id}.")
+            flash("Failed to generate QKD simulation PDF report (internal error).", "danger")
+            return redirect(url_for('qkd_page'))
+
+        # Prepare response
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"QKD_Simulation_Report_{timestamp}.pdf" # Generic filename
+        logging.info(f"Serving QKD PDF report '{filename}' to user {user_id}.")
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+    except Exception as e:
+        logging.error(f"Unexpected error generating/sending QKD PDF report for user {user_id}: {e}", exc_info=True)
+        flash("Unexpected error preparing QKD report.", "danger")
+        return redirect(url_for('qkd_page'))
 
 @app.route('/quantum-impact')
 def quantum_impact(): return render_template("quantum_impact.html")
@@ -739,18 +781,19 @@ def get_log_entry_details(log_id):
     if not conn: logging.error(f"DB Conn failed fetching log details (ID {log_id})"); return None
     try:
         cursor = conn.cursor(dictionary=True)
-        sql = """ SELECT l.*, s_acc.customer_id sd_cid, s_cust.customer_name sd_nm, r_acc.customer_id rv_cid, r_cust.customer_name rv_nm
+        # Corrected alias usage
+        sql = """ SELECT l.*, s_acc.customer_id AS sender_customer_id, s_cust.customer_name AS sender_name,
+                       r_acc.customer_id AS receiver_customer_id, r_cust.customer_name AS receiver_name
                   FROM qkd_transaction_log l LEFT JOIN accounts s_acc ON l.sender_account_id = s_acc.account_id LEFT JOIN customers s_cust ON s_acc.customer_id = s_cust.customer_id
                   LEFT JOIN accounts r_acc ON l.receiver_account_id = r_acc.account_id LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id WHERE l.log_id = %s """
         cursor.execute(sql, (log_id,)); entry = cursor.fetchone()
         if entry:
-            details = {'id': entry['log_id'], 'sender_customer_id': entry.get('sd_cid'), 'receiver_customer_id': entry.get('rv_cid'),
+            details = {'id': entry['log_id'], 'sender_customer_id': entry.get('sender_customer_id'), 'receiver_customer_id': entry.get('receiver_customer_id'),
                 'timestamp': entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if entry['timestamp'] else 'N/A',
-                'sender': f"{entry['sd_nm'] or '?'} (Acc: {entry.get('sender_account_id', '?')})", 'receiver': f"{entry['rv_nm'] or '?'} (Acc: {entry.get('receiver_account_id', '?')})",
+                'sender': f"{entry['sender_name'] or '?'} (Acc: {entry.get('sender_account_id', '?')})", 'receiver': f"{entry['receiver_name'] or '?'} (Acc: {entry.get('receiver_account_id', '?')})",
                 'amount': f"{Decimal(entry['amount'] or '0.00'):.2f}", 'qkd_status': entry['qkd_status'], 'qber': f"{entry['qber_value']:.3f}" if entry['qber_value'] is not None else "N/A",
-                'encrypted_hex': entry.get('encrypted_confirmation', 'N/A'), # This is the base64 data
-                'is_flagged': entry.get('is_flagged', False), 'fraud_reason': entry.get('fraud_reason'),
-                'decrypted_details': "[Encrypted data - Decryption not available here]" }
+                'encrypted_hex': entry.get('encrypted_confirmation', 'N/A'), 'is_flagged': entry.get('is_flagged', False), 'fraud_reason': entry.get('fraud_reason'),
+                'decrypted_details': "[Encrypted data - Decryption not available here]" } # Keep placeholder
     except Exception as e: logging.error(f"Error fetching log details for PDF (ID {log_id}): {e}", exc_info=True)
     finally:
         if cursor: cursor.close(); close_db_connection(conn)
@@ -762,8 +805,8 @@ def download_report(log_id):
     user_id = g.user['id']; log_data = get_log_entry_details(log_id)
     if not log_data: abort(404, description="Log entry not found.")
     if user_id != log_data.get('sender_customer_id') and user_id != log_data.get('receiver_customer_id'): abort(403, description="Unauthorized.")
-    pdf_bytes = create_txn_report_pdf(log_data) # Uses renamed import
-    if not pdf_bytes: abort(500, description="Failed to generate transaction PDF report.")
+    pdf_bytes = create_transaction_report(log_data) # Use correct function name from pdf_generator
+    if not pdf_bytes: abort(500, description="Failed to generate PDF report.")
     filename = f"Transaction_Report_Log_{log_id}.pdf"; logging.info(f"Serving Txn PDF report '{filename}' to user {user_id}.")
     return Response(pdf_bytes, mimetype="application/pdf", headers={"Content-Disposition": f"attachment;filename={filename}"})
 
@@ -795,9 +838,10 @@ def inject_global_vars():
 
 # --- Main execution block ---
 if __name__ == '__main__':
-     print("\n" + "="*60 + "\nStarting QKD Bank Demo Server...\n" + "="*60)
+     print("\n" + "="*60 + "\nStarting Flask Development Server for QKD Bank Demo...\n" + "="*60)
      print("\nDB Schema: Ensure 'iv' column removed/nullable in qkd_transaction_log.")
      print("\nChecking Dependencies...")
+     # Define dependencies and their importance
      dependencies = {
          "cryptography": True, "qiskit_aer": False, "reportlab": True,
          "mysql.connector": True, "flask_wtf": True, "email_validator": True,
@@ -807,23 +851,25 @@ if __name__ == '__main__':
      all_found = True
 
      for name, is_critical in dependencies.items():
-         pip_name = name; module_name = name.replace("-", "_")
+         pip_name = name # Default pip name
+         module_name = name.replace("-", "_") # Default module name
          try:
+             # Special handling for imports where module name differs from pip name
              if name == "sklearn": pip_name = "scikit-learn"; import sklearn
-             elif name == "joblib": pip_name = "joblib"; import joblib
+             elif name == "joblib": pip_name = "joblib (usually with scikit-learn)"; import joblib
              elif name == "flask_wtf": pip_name = "Flask-WTF"; import flask_wtf
              elif name == "mysql.connector": pip_name = "mysql-connector-python"; import mysql.connector
              elif name == "qiskit_aer": pip_name = "qiskit-aer"; import qiskit_aer
              elif name == "email_validator": pip_name = "email-validator"; import email_validator
              elif name == "pandas": pip_name = "pandas"; import pandas
-             else: __import__(module_name)
+             else: __import__(module_name) # General case using module name
+
              print(f"  - [OK] {name}")
          except ImportError:
              level = "ERROR" if is_critical else "WARN"
-             pip_install_suggestion = f"pip install {pip_name}" if name != "joblib" else "pip install scikit-learn"
-             print(f"  - [{level}] '{name}' not found! (Try: {pip_install_suggestion})")
+             print(f"  - [{level}] '{name}' not found! (Try: pip install {pip_name})")
              if is_critical: all_found = False
-         except Exception as e:
+         except Exception as e: # Catch other potential import errors
              level = "ERROR" if is_critical else "WARN"
              print(f"  - [{level}] Error importing '{name}': {e}")
              if is_critical: all_found = False
@@ -831,23 +877,35 @@ if __name__ == '__main__':
      if not all_found: print(f"\nPlease install missing critical dependencies before running."); exit()
 
      print("\nChecking for ML Model Files...")
-     _MODEL_FILENAME = 'fraud_model.joblib'; _FEATURES_FILENAME = 'fraud_model_features.joblib'
-     try: model_file_path = os.path.join(os.path.dirname(__file__), MODEL_FILENAME); features_file_path = os.path.join(os.path.dirname(__file__), FEATURES_FILENAME)
-     except NameError: model_file_path = os.path.join(os.path.dirname(__file__), _MODEL_FILENAME); features_file_path = os.path.join(os.path.dirname(__file__), _FEATURES_FILENAME)
-     if os.path.exists(model_file_path) and os.path.exists(features_file_path): print(f"  - [OK] ML files '{os.path.basename(model_file_path)}' and '{os.path.basename(features_file_path)}' found.")
-     else: print(f"  - [WARN] ML files not found in {os.path.dirname(__file__)}. Run 'train_fraud_model.py'. ML fraud detection disabled.");
+     # Use constants imported from ml_fraud_model if possible
+     _MODEL_FILENAME = 'fraud_model.joblib'
+     _FEATURES_FILENAME = 'fraud_model_features.joblib'
+     try:
+         model_file_path = os.path.join(os.path.dirname(__file__), MODEL_FILENAME)
+         features_file_path = os.path.join(os.path.dirname(__file__), FEATURES_FILENAME)
+     except NameError: # Fallback if import failed
+         model_file_path = os.path.join(os.path.dirname(__file__), _MODEL_FILENAME)
+         features_file_path = os.path.join(os.path.dirname(__file__), _FEATURES_FILENAME)
+
+     if os.path.exists(model_file_path) and os.path.exists(features_file_path):
+          print(f"  - [OK] ML files '{os.path.basename(model_file_path)}' and '{os.path.basename(features_file_path)}' found.")
+     else:
+          print(f"  - [WARN] ML files ('{os.path.basename(model_file_path)}', '{os.path.basename(features_file_path)}') not found in {os.path.dirname(__file__)}.")
+          print("         Run 'train_fraud_model.py' script first. ML detection will be disabled if model fails load.")
 
      print("\nChecking Database Connection...")
      conn_test = get_db_connection()
      if conn_test:
          print(f"  - [OK] Database connection successful ({MYSQL_HOST}/{MYSQL_DB})."); close_db_connection(conn_test)
          print("\nStarting Server..."); print(f"Access at: http://127.0.0.1:5001/ (or http://0.0.0.0:5001/)"); print("Press CTRL+C to stop.\n" + "="*60 + "\n")
+         # Run Flask App using Waitress (preferred for dev over Flask default server)
          try:
              from waitress import serve
-             print("--- Running with Waitress ---")
-             serve(app, host='0.0.0.0', port=5001, threads=8) # Increased threads slightly
+             print("--- Running with Waitress (Development Mode) ---")
+             serve(app, host='0.0.0.0', port=5001, threads=6) # Use port 5001
          except ImportError:
-             print("--- Waitress not found. Running with Flask Dev Server (NOT FOR PRODUCTION!) ---")
-             app.run(debug=True, host='0.0.0.0', port=5001)
+             print("--- Waitress not found. Running with Flask Development Server ---")
+             print("--- WARNING: Flask's built-in server is not suitable for production! ---")
+             app.run(debug=True, host='0.0.0.0', port=5001) # Fallback, use port 5001
      else:
           print("\n" + "="*60 + "\nFATAL: Database connection failed."); print(f"Config: HOST={MYSQL_HOST}, USER={MYSQL_USER}, DB={MYSQL_DB}"); print("Check MySQL server, credentials, privileges, DB/tables exist."); print("="*60 + "\n"); exit()

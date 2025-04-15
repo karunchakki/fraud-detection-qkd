@@ -7,27 +7,25 @@
  */
 document.addEventListener('DOMContentLoaded', function () {
     const canvasElement = document.getElementById('qberChart');
-    const simulationDataExists = typeof window.qkdChartLabels !== 'undefined'; // Basic check if data was injected
 
     if (!canvasElement) {
         // console.log("QBER Chart canvas not found on this page.");
         return; // Exit if canvas doesn't exist
     }
 
-    // --- Get Data (Safely access potentially undefined global vars) ---
+    // --- Get Data ---
     const labels = window.qkdChartLabels || ['No Data'];
     const qberData = window.qkdChartQberData || [0];
     const qberThreshold = typeof window.qkdChartQberThreshold === 'number'
-        ? window.qkdChartQberThreshold // Expecting percentage value
-        : 15.0; // Default to 15%
+        ? window.qkdChartQberThreshold : 15.0; // Default to 15%
 
-    // Basic validation
+    // --- Validation ---
     if (!Array.isArray(labels) || !Array.isArray(qberData) || labels.length !== qberData.length) {
         console.error("Invalid or mismatched chart data provided.", { labels, qberData });
-        canvasElement.parentElement.innerHTML = '<p class="text-red-500 text-center text-sm p-4">Error: Invalid data for QBER chart.</p>';
+        canvasElement.parentElement.innerHTML = '<p class="text-red-500 dark:text-red-400 text-center text-sm p-4">Error: Invalid data for QBER chart.</p>';
         return;
     }
-     if (labels.length === 0 || (labels.length === 1 && labels[0] === 'N/A')) { // Check for empty or default 'N/A'
+     if (labels.length === 0 || (labels.length === 1 && labels[0] === 'N/A')) { // Check for empty or placeholder
          console.log("No QBER history data provided for chart.");
          canvasElement.parentElement.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center text-sm p-4">No QBER history data available to display.</p>';
          return;
@@ -41,10 +39,10 @@ document.addEventListener('DOMContentLoaded', function () {
         new Chart(canvasElement, {
             type: 'line',
             data: {
-                labels: labels,
+                labels: labels, // e.g., ['Log 101', 'Log 105', ...]
                 datasets: [{
-                    label: 'QBER (%)', // Simplified label
-                    data: qberData,
+                    label: 'QBER (%)',
+                    data: qberData, // e.g., [1.2, 0.5, ...]
                     borderColor: 'rgb(59, 130, 246)', // Tailwind blue-500
                     backgroundColor: 'rgba(59, 130, 246, 0.1)',
                     fill: true,
@@ -54,12 +52,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     pointHoverRadius: 5
                  },
                  { // Threshold Line
-                    label: 'Threshold (%)', // Simplified label
-                    data: thresholdData,
+                    label: 'Threshold (%)',
+                    data: thresholdData, // e.g., [15.0, 15.0, ...]
                     borderColor: 'rgb(239, 68, 68)', // Tailwind red-500
                     borderWidth: 2,
                     borderDash: [6, 6],
-                    pointRadius: 0,
+                    pointRadius: 0, // No circles on threshold line
                     fill: false,
                     tension: 0
                  }]
@@ -72,51 +70,64 @@ document.addEventListener('DOMContentLoaded', function () {
                         beginAtZero: true,
                         title: { display: true, text: 'QBER (%)' },
                         suggestedMax: Math.max(25, qberThreshold * 1.2), // Ensure threshold is visible
-                        grid: { color: 'rgba(200, 200, 200, 0.1)'} // Lighter grid lines
+                        grid: { color: 'rgba(200, 200, 200, 0.2)'} // Slightly more visible grid
                     },
                     x: {
-                        title: {display: true, text: 'Transaction Log ID'}, // Updated label
-                        grid: { display: false } // Hide vertical grid lines
+                        title: {display: true, text: 'Transaction Log ID / Run'},
+                        grid: { display: false }
                     }
                 },
                  plugins: {
                      legend: {
-                         position: 'top', // Changed from bottom for potentially better layout
+                         position: 'top', // Move legend back to top maybe? Or keep 'bottom'
                          labels: { padding: 15 }
                      },
                      tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        mode: 'index', // Show all datasets for that x-axis point
+                        intersect: false, // Show tooltip when hovering near the point
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)', // Darker tooltip
                         titleFont: { weight: 'bold' },
-                        bodySpacing: 4,
-                        padding: 10,
-                        // --- UPDATED TOOLTIP CALLBACK ---
+                        bodySpacing: 5, // Slightly more spacing
+                        padding: 12, // More padding
+                        boxPadding: 3, // Padding inside the box
+                        borderColor: 'rgba(255,255,255,0.2)', // Optional border
+                        borderWidth: 1,
                         callbacks: {
+                            // --- MODIFIED: Use label for Title ---
+                            title: function(tooltipItems) {
+                                // tooltipItems is an array, usually one item per dataset for index mode
+                                if (tooltipItems.length > 0) {
+                                    return tooltipItems[0].label; // Use the x-axis label (e.g., "Log 101")
+                                }
+                                return '';
+                            },
+                            // --- Refined Label Display ---
                             label: function(context) {
-                                let lineLabel = context.dataset.label || ''; // e.g., 'QBER (%)' or 'Threshold (%)'
-                                const pointLabel = context.label || ''; // e.g., 'Log 123'
-                                const value = context.parsed.y; // The numerical y-value
+                                let label = context.dataset.label || '';
+                                const value = context.parsed.y;
+                                let output = '';
 
-                                if (value === null || typeof value === 'undefined') {
-                                    return lineLabel; // Don't show value if null/undefined
-                                }
-
-                                let finalLabel = '';
-                                // Add Log ID prefix for QBER points, but not for the threshold line
-                                if (!lineLabel.includes('Threshold')) {
-                                    finalLabel += `${pointLabel} - `; // Add 'Log XXX - ' prefix
-                                }
-
-                                // Add the specific metric and formatted value
-                                if (lineLabel.includes('Threshold')) {
-                                    finalLabel += `Threshold: ${value.toFixed(1)}%`;
+                                if (label.includes('Threshold')) {
+                                    // Just show threshold value cleanly
+                                    output = value !== null ? ` Threshold: ${value.toFixed(1)}%` : '';
                                 } else {
-                                    finalLabel += `QBER: ${value.toFixed(2)}%`;
+                                    // Show QBER value
+                                    output = value !== null ? ` QBER: ${value.toFixed(2)}%` : '';
+                                    // Optional: Add comparison to threshold
+                                    if (value !== null) {
+                                        output += (value > qberThreshold) ? ' (Above!)' : ' (OK)';
+                                    }
                                 }
-                                return finalLabel;
-                            }
-                        } // --- END UPDATED TOOLTIP CALLBACK ---
+                                return output;
+                            },
+                            // Optional: Customize label color
+                            // labelColor: function(tooltipItem, chart) {
+                            //     return {
+                            //         borderColor: 'rgba(0, 0, 0, 0)',
+                            //         backgroundColor: tooltipItem.dataset.borderColor // Match line color
+                            //     };
+                            // },
+                        }
                      }
                 }
             }
@@ -125,6 +136,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     } catch (error) {
         console.error("Failed to create Chart.js instance:", error);
-        canvasElement.parentElement.innerHTML = '<p class="text-red-500 text-center text-sm p-4">Error loading chart.</p>';
+        canvasElement.parentElement.innerHTML = '<p class="text-red-500 dark:text-red-400 text-center text-sm p-4">Error loading chart.</p>';
     }
 });
