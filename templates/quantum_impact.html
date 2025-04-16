@@ -2,19 +2,23 @@
 
 {% block title %}Quantum Impact on Banking & Finance - QKD Secure Bank{% endblock %}
 
-{# Remove the old head_style block #}
+{# Removed head_style block as it's likely handled in base.html #}
 
 {% block content %}
-    <h2 class="text-3xl font-semibold text-gray-800 mb-10 text-center">
+<div class="container mx-auto px-4 py-8"> {# Added container #}
+
+    {# Added dark mode text color #}
+    <h2 class="text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-10 text-center border-b dark:border-gray-600 pb-4">
         Potential Quantum Computing Applications in Banking & Finance
     </h2>
 
-    {# Use max-width for better readability of text content #}
-    <div class="max-w-4xl mx-auto space-y-10 text-gray-700 text-base leading-relaxed">
+    {# Use max-width for readability & add dark mode text for paragraphs #}
+    <div class="max-w-4xl mx-auto space-y-10 text-gray-700 dark:text-gray-300 text-base leading-relaxed">
 
         <!-- Overview Section -->
         <section>
-            <h3 class="text-2xl font-semibold text-indigo-700 mb-3 border-b pb-2">Overview</h3>
+             {# Added dark mode text color & border #}
+            <h3 class="text-2xl font-semibold text-indigo-700 dark:text-indigo-400 mb-3 border-b dark:border-gray-600 pb-2">Overview</h3>
             <p>
                 Quantum computing holds the potential to revolutionize various aspects of the financial industry, extending far beyond its impact on current cryptography. Its unique ability to tackle certain computationally complex problems exponentially faster than classical computers opens doors for significant advancements in analysis, optimization, and simulation.
             </p>
@@ -22,41 +26,44 @@
 
         <!-- Key Application Areas -->
         <section>
-            <h3 class="text-2xl font-semibold text-indigo-700 mb-4 border-b pb-2">Key Application Areas</h3>
+             {# Added dark mode text color & border #}
+            <h3 class="text-2xl font-semibold text-indigo-700 dark:text-indigo-400 mb-4 border-b dark:border-gray-600 pb-2">Key Application Areas</h3>
             <ul class="space-y-4">
-                {# Using a slightly different list style for visual separation #}
-                <li class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
-                    <strong class="text-indigo-800 block mb-1">Portfolio Optimization:</strong> Finding the optimal allocation of assets to maximize returns for a given level of risk (or vice-versa). Quantum algorithms like QAOA or VQE could explore vast combinatorial possibilities more efficiently than classical methods.
+                {# Added dark mode styling to list items #}
+                <li class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <strong class="text-indigo-800 dark:text-indigo-400 block mb-1">Portfolio Optimization:</strong> Finding the optimal allocation of assets to maximize returns for a given level of risk (or vice-versa). Quantum algorithms like QAOA or VQE could explore vast combinatorial possibilities more efficiently than classical methods.
                 </li>
-                <li class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
-                    <strong class="text-indigo-800 block mb-1">Risk Modeling & Simulation:</strong> Performing complex Monte Carlo simulations for market risk, credit risk (e.g., calculating Value at Risk - VaR, Conditional Value at Risk - CVaR), and regulatory stress testing with potentially greater speed and accuracy. Quantum Amplitude Estimation could accelerate these tasks.
+                <li class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <strong class="text-indigo-800 dark:text-indigo-400 block mb-1">Risk Modeling & Simulation:</strong> Performing complex Monte Carlo simulations for market risk, credit risk (e.g., calculating Value at Risk - VaR, Conditional Value at Risk - CVaR), and regulatory stress testing with potentially greater speed and accuracy. Quantum Amplitude Estimation could accelerate these tasks.
                 </li>
-                 <li class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
-                    <strong class="text-indigo-800 block mb-1">Derivative Pricing:</strong> Accurately pricing complex financial derivatives often involves solving partial differential equations or extensive simulations. Quantum algorithms might offer speedups for specific pricing models, especially those involving many variables.
+                 <li class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <strong class="text-indigo-800 dark:text-indigo-400 block mb-1">Derivative Pricing:</strong> Accurately pricing complex financial derivatives often involves solving partial differential equations or extensive simulations. Quantum algorithms might offer speedups for specific pricing models, especially those involving many variables.
                 </li>
-                 <li class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
-                    <strong class="text-indigo-800 block mb-1">Fraud Detection & Anti-Money Laundering (AML):</strong> Identifying subtle, complex patterns across enormous datasets related to fraudulent transactions or money laundering activities. Quantum Machine Learning (QML) could potentially enhance pattern recognition and anomaly detection capabilities.
+                 <li class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <strong class="text-indigo-800 dark:text-indigo-400 block mb-1">Fraud Detection & Anti-Money Laundering (AML):</strong> Identifying subtle, complex patterns across enormous datasets related to fraudulent transactions or money laundering activities. Quantum Machine Learning (QML) could potentially enhance pattern recognition and anomaly detection capabilities.
                 </li>
-                 <li class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
-                    <strong class="text-indigo-800 block mb-1">Credit Scoring:</strong> Enhancing the predictive power of credit scoring models by analyzing more intricate, non-linear relationships between applicant variables using QML techniques.
+                 <li class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <strong class="text-indigo-800 dark:text-indigo-400 block mb-1">Credit Scoring:</strong> Enhancing the predictive power of credit scoring models by analyzing more intricate, non-linear relationships between applicant variables using QML techniques.
                 </li>
-                 <li class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
-                    <strong class="text-indigo-800 block mb-1">Cybersecurity (Defense):</strong> While QKD offers secure key exchange, quantum computing also drives the development of new Post-Quantum Cryptography (PQC) algorithms designed to be resistant to attacks from both classical and quantum computers.
+                 <li class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <strong class="text-indigo-800 dark:text-indigo-400 block mb-1">Cybersecurity (Defense):</strong> While QKD offers secure key exchange, quantum computing also drives the development of new Post-Quantum Cryptography (PQC) algorithms designed to be resistant to attacks from both classical and quantum computers.
                 </li>
             </ul>
         </section>
 
          <!-- Current Status & Challenges -->
         <section>
-            <h3 class="text-2xl font-semibold text-indigo-700 mb-4 border-b pb-2">Current Status & Challenges</h3>
+             {# Added dark mode text color & border #}
+            <h3 class="text-2xl font-semibold text-indigo-700 dark:text-indigo-400 mb-4 border-b dark:border-gray-600 pb-2">Current Status & Challenges</h3>
             <p class="mb-4">
                 While the potential is immense, practical quantum computing applications in finance are still largely in the research and development phase. Key hurdles include:
             </p>
-             <ul class="list-disc space-y-2 pl-6 mb-4">
-                 <li><strong class="font-medium">Hardware Limitations:</strong> Current quantum computers (NISQ-era) have limitations in qubit count, coherence times, and error rates, restricting the scale and complexity of problems they can solve reliably.</li>
-                 <li><strong class="font-medium">Algorithm Development:</strong> Discovering and refining quantum algorithms that provide a proven, practical advantage over the best classical algorithms for specific, high-value financial problems remains an active area of research.</li>
-                 <li><strong class="font-medium">Integration Challenges:</strong> Seamlessly integrating quantum computations (often run on specialized hardware/cloud platforms) with existing classical banking infrastructure and workflows requires significant effort.</li>
-                 <li><strong class="font-medium">Talent Gap:</strong> There is a need for professionals with expertise spanning quantum computing, finance, and software engineering to develop and implement these solutions.</li>
+             {# Added dark mode text color to list items and strong tags #}
+             <ul class="list-disc space-y-2 pl-6 mb-4 dark:text-gray-300">
+                 <li><strong class="font-medium dark:text-gray-100">Hardware Limitations:</strong> Current quantum computers (NISQ-era) have limitations in qubit count, coherence times, and error rates, restricting the scale and complexity of problems they can solve reliably.</li>
+                 <li><strong class="font-medium dark:text-gray-100">Algorithm Development:</strong> Discovering and refining quantum algorithms that provide a proven, practical advantage over the best classical algorithms for specific, high-value financial problems remains an active area of research.</li>
+                 <li><strong class="font-medium dark:text-gray-100">Integration Challenges:</strong> Seamlessly integrating quantum computations (often run on specialized hardware/cloud platforms) with existing classical banking infrastructure and workflows requires significant effort.</li>
+                 <li><strong class="font-medium dark:text-gray-100">Talent Gap:</strong> There is a need for professionals with expertise spanning quantum computing, finance, and software engineering to develop and implement these solutions.</li>
              </ul>
             <p>
                 Despite these challenges, progress is rapid. Financial institutions globally are investing in research, exploring proofs-of-concept, and forming partnerships with quantum technology providers to prepare for the quantum future.
@@ -66,10 +73,12 @@
     </div> {# End max-width container #}
 
      <!-- Navigation back to dashboard -->
-    <div class="mt-12 text-center border-t border-gray-200 pt-8">
+     {# Added dark mode border #}
+    <div class="mt-12 text-center border-t border-gray-200 dark:border-gray-600 pt-8">
         <a href="{{ url_for('index') }}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-300 text-sm">
             ← Back to Dashboard
         </a>
     </div>
 
+</div> {# End container #}
 {% endblock %}

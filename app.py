@@ -48,7 +48,7 @@ WTFORMS_AVAILABLE = False
 try:
     from flask_wtf import FlaskForm
     from wtforms import StringField, PasswordField, SubmitField, EmailField, DecimalField, SelectField, BooleanField
-    from wtforms.validators import DataRequired, Email, EqualTo, Length, NumberRange, InputRequired
+    from wtforms.validators import (DataRequired, Email, EqualTo, Length, NumberRange, InputRequired,Optional) 
     WTFORMS_AVAILABLE = True
     print("--- Flask-WTF and WTForms found. Forms enabled. ---")
 except ImportError:
@@ -213,8 +213,12 @@ if WTFORMS_AVAILABLE:
     class RegistrationForm(FlaskForm):
          customer_name = StringField('Full Name', validators=[DataRequired(), Length(min=2, max=100)], filters=[lambda x: x.strip() if x else x])
          email = EmailField('Email Address', validators=[DataRequired(), Email()], filters=[lambda x: x.strip().lower() if x else x])
+         # *** ADD THIS LINE ***
+         phone_number = StringField('Phone Number', validators=[Optional(), Length(min=10, max=20)]) # Added Optional() validator
+         # *** END ADDITION ***
          password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
          confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password', message='Passwords must match.')])
+         # OTP and CAPTCHA fields are still omitted from the form class
          submit = SubmitField('Register Account')
 
     class ForgotPasswordForm(FlaskForm):
@@ -578,113 +582,198 @@ def index():
 @app.route('/register', methods=['GET', 'POST'])
 def register_customer():
     """Handles new customer registration."""
-    if g.user: return redirect(url_for('index'))
-    form = RegistrationForm() if WTFORMS_AVAILABLE else None
+    if g.user: return redirect(url_for('index')) # Redirect if already logged in
+    form = RegistrationForm() if WTFORMS_AVAILABLE else None # Instantiate form if WTForms available
 
+    # --- Handle POST Request ---
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
 
-        # Extract data (handles both WTForms and manual cases)
+        # --- 1. Extract Form Data ---
+        # This section now handles both WTForms success and manual POST data extraction
         if WTFORMS_AVAILABLE:
+            # Data already validated by form.validate_on_submit()
             customer_name = form.customer_name.data
             email = form.email.data
             password = form.password.data
-        else: # Manual extraction and basic validation
+            phone_number = form.phone_number.data # Assumes phone_number field exists in WTForm
+        else:
+            # Manual extraction from request.form (for when WTFORMS_AVAILABLE is False)
             customer_name = request.form.get('customer_name','').strip()
             email = request.form.get('email','').strip().lower()
             password = request.form.get('password','')
             confirm_password = request.form.get('confirm_password','')
+            phone_number = request.form.get('phone_number', '').strip() # Get phone number
+
+            # Basic Manual Validation (if WTForms didn't run)
             errors = []
-            if not customer_name or len(customer_name) < 2: errors.append("Name too short")
-            if not email or '@' not in email: errors.append("Invalid email")
-            if not password or len(password) < 8: errors.append("Password min 8 chars") # Match WTForm
-            if password != confirm_password: errors.append("Passwords don't match")
-            if errors:
+            if not customer_name or len(customer_name) < 2: errors.append("Full Name must be at least 2 characters.")
+            if not email or '@' not in email: errors.append("Please enter a valid email address.")
+            if not password or len(password) < 8: errors.append("Password must be at least 8 characters long.")
+            if password != confirm_password: errors.append("Passwords do not match.")
+            # Optional: Basic phone number check (e.g., length) if needed here
+            # if phone_number and (len(phone_number) < 10 or not phone_number.isdigit()): errors.append("Invalid phone number format.")
+
+            if errors: # If manual validation fails
                 for err in errors: flash(err, 'error')
+                # Pass form=None if WTForms unavailable, otherwise pass the failed form object
                 return render_template('register.html', form=form)
 
-        # --- Database Operations ---
+        # --- 2. Placeholder Validations (OTP/CAPTCHA) ---
+        # These are skipped for the demo but show where real validation would occur
+
+        # Placeholder for CAPTCHA Validation
+        # captcha_response = request.form.get('g-recaptcha-response') # Example field name from CAPTCHA widget
+        # In a real app, you would call a function to verify this response with the CAPTCHA provider:
+        # if not verify_captcha(captcha_response):
+        #     flash("Invalid CAPTCHA verification. Please try again.", "error")
+        #     return render_template('register.html', form=form)
+        logging.info("DEMO MODE: Skipping CAPTCHA validation.") # Log that it's skipped
+
+        # Placeholder for OTP Validation
+        # This would typically happen after the user receives and enters an OTP,
+        # possibly involving an intermediate step or AJAX verification.
+        # submitted_otp = request.form.get('otp_field_name') # Example OTP input field name
+        # In a real app, you would verify the submitted OTP against a stored value:
+        # if not verify_otp(email_or_phone, submitted_otp): # Verify against stored OTP
+        #     flash("The OTP entered is incorrect or has expired.", "error")
+        #     return render_template('register.html', form=form) # Or redirect back to OTP entry
+        logging.info("DEMO MODE: Skipping OTP validation.") # Log that it's skipped
+
+        # --- 3. Database Operations ---
         conn = None; cursor = None; user_exists = False; error_occurred = False
-        # 1. Pre-check (Email, optional Name)
+
+        # 3a. Pre-check if email exists
         try:
              conn = get_db_connection()
-             if not conn: flash("DB connection error.", "error"); return render_template('register.html', form=form)
+             if not conn:
+                 flash("Database connection error during pre-check.", "error")
+                 return render_template('register.html', form=form)
+
              cursor = conn.cursor(dictionary=True)
              cursor.execute("SELECT customer_id FROM customers WHERE email = %s", (email,))
              if cursor.fetchone():
                  user_exists = True
-                 if WTFORMS_AVAILABLE: form.email.errors.append("Email already registered.")
-                 else: flash("Email already registered.", "error")
-             # Add name check here if needed...
+                 # Add error to form if WTForms used, otherwise flash
+                 if WTFORMS_AVAILABLE and hasattr(form.email, 'errors'):
+                      form.email.errors.append("Email address is already registered.")
+                 else:
+                      flash("Email address is already registered.", "error")
+             # Optional: Add pre-check for phone number uniqueness if required
+
         except MySQLError as e:
-            logging.error(f"DB pre-check error: {e}")
-            flash("Database pre-check error.", "error"); error_occurred = True
+            logging.error(f"Database error during registration pre-check for {email}: {e}")
+            flash("A database error occurred during pre-check.", "error")
+            error_occurred = True
         except Exception as e:
-             logging.error(f"Unexpected pre-check error: {e}", exc_info=True)
-             flash("Unexpected pre-check error.", "error"); error_occurred = True
+             logging.error(f"Unexpected error during registration pre-check: {e}", exc_info=True)
+             flash("An unexpected error occurred during pre-check.", "error")
+             error_occurred = True
         finally:
-             if cursor: cursor.close()
-             # Keep connection open ONLY if pre-check passed and no error occurred
+             if cursor:
+                 try: cursor.close()
+                 except MySQLError: pass
+             # Keep connection ONLY if checks passed and no error
              if (user_exists or error_occurred) and conn and conn.is_connected():
                  close_db_connection(conn)
 
+        # If email exists or error occurred, stop and re-render
         if user_exists or error_occurred:
-            return render_template('register.html', form=form) # Re-render with errors
+            return render_template('register.html', form=form)
 
-        # 2. Insert (if pre-checks ok and connection is still open)
+                # 3b. Insert new user (if pre-checks passed)
+        # Connection should still be open from the pre-check phase if successful
         cursor = None; needs_rollback = False; new_customer_id = None
         try:
-            # Ensure connection is available (it should be unless closed above)
+            # Double-check connection state
             if not conn or not conn.is_connected():
-                logging.error("DB connection unexpectedly closed before insert.")
-                flash("DB connection error. Please try again.", "error")
+                logging.error("DB connection lost before registration insert transaction.")
+                flash("Database connection lost. Please try registering again.", "error")
                 if conn: close_db_connection(conn) # Cleanup just in case
                 return render_template('register.html', form=form)
 
-            cursor = conn.cursor()
-            needs_rollback = True
+            cursor = conn.cursor() # Use standard cursor for inserts
+            needs_rollback = True # Assume rollback needed until commit succeeds
             hashed_pw = generate_password_hash(password)
-            # Insert Customer
-            cursor.execute("INSERT INTO customers (customer_name, email, password_hash) VALUES (%s, %s, %s)", (customer_name, email, hashed_pw))
+
+            # Define the SQL query to include the phone_number column
+            sql_insert_customer = """
+                INSERT INTO customers
+                (customer_name, email, password_hash, phone_number)
+                VALUES (%s, %s, %s, %s)
+            """
+
+            # Prepare the phone number value for the database:
+            # If the retrieved phone_number string is empty, set it to None
+            # so that NULL is inserted into the database column.
+            phone_number_to_db = phone_number if phone_number else None
+
+            # Create the tuple of parameters in the correct order for the SQL query
+            customer_params = (customer_name, email, hashed_pw, phone_number_to_db)
+
+            # ---> CODE TO ADD/EXECUTE NEXT <---
+
+            # Execute Insert Customer Query
+            cursor.execute(sql_insert_customer, customer_params)
+
+            # Get the ID of the newly inserted customer
             new_customer_id = cursor.lastrowid
-            if not new_customer_id: raise MySQLError("Failed to insert customer record.")
-            # Insert Account
-            cursor.execute("INSERT INTO accounts (customer_id, balance) VALUES (%s, %s)", (new_customer_id, str(app.config['INITIAL_BALANCE'])))
-            account_id = cursor.lastrowid
-            if not account_id: raise MySQLError(f"Failed to insert account for customer {new_customer_id}.")
+            # Check if ID was generated (crucial!)
+            if not new_customer_id:
+                raise MySQLError("Failed to get customer ID after insert (lastrowid is null).")
+            logging.debug(f"Inserted customer '{customer_name}' (ID: {new_customer_id}) with phone: {phone_number_to_db}")
 
+            # Insert initial account for the new customer
+            sql_insert_account = "INSERT INTO accounts (customer_id, balance) VALUES (%s, %s)"
+            account_params = (new_customer_id, str(app.config['INITIAL_BALANCE']))
+            cursor.execute(sql_insert_account, account_params)
+            new_account_id = cursor.lastrowid
+            # Check if account ID was generated
+            if not new_account_id:
+                raise MySQLError(f"Failed to get account ID after insert for customer {new_customer_id}.")
+            logging.debug(f"Inserted account {new_account_id} for customer {new_customer_id}")
+
+            # If both inserts succeeded, commit the transaction
             conn.commit()
-            needs_rollback = False
-            logging.info(f"Registered new user: {customer_name} (ID: {new_customer_id})")
-            flash("Registration successful! Please log in.", "success")
+            needs_rollback = False # No need to rollback if commit succeeded
+            logging.info(f"Successfully registered new user: '{customer_name}' ({email}), ID: {new_customer_id}")
+            flash("Registration successful! You can now log in.", "success")
 
-            # Close and redirect AFTER successful commit
+            # Close resources and redirect AFTER successful commit
             if cursor: cursor.close()
             close_db_connection(conn)
             return redirect(url_for('login'))
 
+            # ---> END OF CODE TO ADD <---
+
         except (MySQLError, ConnectionError) as e:
-            logging.error(f"DB insert error during registration: {e}", exc_info=True)
-            flash("Database registration error.", "error")
+            # Handle DB errors during insert/commit
+            logging.error(f"Database error during registration insert/commit for {email}: {e}", exc_info=True)
+            flash("A database error occurred during registration.", "error")
         except Exception as e:
-            logging.error(f"Unexpected registration error: {e}", exc_info=True)
-            flash("Unexpected error during registration.", "error")
+            # Handle any other unexpected errors
+            logging.error(f"Unexpected error during registration insert/commit: {e}", exc_info=True)
+            flash("An unexpected error occurred during registration.", "error")
         finally:
-            # Cleanup for INSERT transaction block
+            # Cleanup: Rollback if needed, close cursor/connection
             if conn and conn.is_connected():
                 if needs_rollback:
                     try:
                         conn.rollback()
-                        logging.warning(f"Registration transaction rolled back for {email}.")
+                        logging.warning(f"Registration transaction rolled back for '{email}'.")
                     except MySQLError as rb_err:
-                         logging.error(f"Rollback failed during registration error handling: {rb_err}")
-                if cursor: cursor.close() # Close cursor if it exists
+                        logging.error(f"Rollback attempt failed for '{email}': {rb_err}")
+                if cursor:
+                    try: cursor.close()
+                    except MySQLError: pass # Ignore cursor close errors here
                 close_db_connection(conn) # Always close the connection used
 
-        # Re-render form if insert failed
+        # If we reach here, it means the 'try' block failed after pre-checks
+        # Re-render the form (flashed errors will be displayed)
         return render_template('register.html', form=form)
 
-    # Handle GET request or initial WTForms validation fail
+    # --- Handle GET Request ---
+    # This renders the initial empty form or re-renders if WTForms validation failed on initial POST
     return render_template('register.html', form=form)
 
 
@@ -741,69 +830,108 @@ def logout():
     logging.info(f"User {user_name} (ID: {user_id}) logged out.")
     return redirect(url_for('login'))
 
+# Inside app.py
+
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
     """Handles password reset request (sending email)."""
-    if g.user: return redirect(url_for('index'))
-    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None
+    if g.user: return redirect(url_for('index')) # Redirect if already logged in
+    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None # Instantiate form if WTForms available
 
-    # Check prerequisites
+    # --- Prerequisite Check ---
+    # Ensure mail and serializer components are ready before proceeding
     if not MAIL_AVAILABLE or not serializer:
-        logging.warning("Password reset service unavailable (Mail/Serializer missing/failed).")
+        log_msg = "Password reset unavailable:"
+        if not MAIL_AVAILABLE: log_msg += " Mail system not configured/available."
+        if not serializer: log_msg += " Serializer not initialized (SECRET_KEY issue?)."
+        logging.warning(log_msg)
         flash("Password reset service is currently unavailable.", "warning")
-        return redirect(url_for('login'))
+        return redirect(url_for('login')) # Redirect if prerequisites fail
 
+    # --- Handle POST Request ---
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
 
+        # --- 1. Extract Email ---
         email = form.email.data if WTFORMS_AVAILABLE else request.form.get('email','').strip().lower()
-        if not email: # Basic check if no WTForms
-             flash("Email address is required.", "error")
+        # Basic validation if WTForms not used
+        if not email or '@' not in email:
+             flash("Please enter a valid email address.", "error")
              return render_template('forgot_password.html', form=form)
 
         logging.info(f"Password reset requested for email: {email}")
+
+        # --- 2. Check if User Exists ---
         user = get_user_by_email(email)
 
-        if user: # Proceed only if user exists
+        # --- 3. Generate Token and Send Email (only if user exists) ---
+        if user:
             try:
-                token_expiration_seconds = 3600 # 1 hour
+                # Generate Timed Token
+                token_expiration_seconds = 3600 # 1 hour validity
+                # Use a specific salt for password reset tokens
                 token = serializer.dumps(email, salt='password-reset-salt')
+                # Generate the full external URL for the reset link
                 reset_url = url_for('reset_password', token=token, _external=True)
-                logging.info(f"Generated password reset URL for {email}")
+                logging.info(f"Generated password reset token/URL for {email}")
 
-                subject = "Reset QSB Password"
-                sender_address = app.config['MAIL_DEFAULT_SENDER']
-                recipients = [email]
-                email_body = f"""Hello {user.get('customer_name', 'User')},
+                # Prepare Email Content
+                subject = "Password Reset Request - QKD Secure Bank"
 
-Click the link below to reset your password:
+                # *** CUSTOMIZE SENDER DISPLAY ***
+                # Define the display name and use the configured sender address
+                # This tuple formats the 'From' field in many email clients
+                sender_display_tuple = ("QSB Secure Banking", app.config['MAIL_DEFAULT_SENDER'])
+                # *** END CUSTOMIZATION ***
+
+                recipients_list = [email] # Use a clear variable name
+                email_body = f"""Hello {user.get('customer_name', 'Valued Customer')},
+
+You recently requested to reset your password for your QKD Secure Bank account.
+Click the link below to set a new password:
+
 {reset_url}
 
-This link expires in {token_expiration_seconds // 60} minutes.
+This link is valid for {token_expiration_seconds // 60} minutes.
 
-If you did not request this, please ignore this email.
+If you did not request a password reset, please ignore this email or contact support if you have concerns.
 
-Thanks,
-QSB Demo Team"""
-                msg = Message(subject=subject, sender=sender_address, recipients=recipients, body=email_body)
-                # Use current_app.app_context() for the thread
+Thank you,
+The QKD Secure Bank Team"""
+
+                # Create the Flask-Mail Message object
+                msg = Message(subject=subject,
+                              # Use the tuple for the sender argument
+                              sender=sender_display_tuple,
+                              recipients=recipients_list,
+                              body=email_body)
+
+                # Queue the email for sending in a background thread
+                # Pass the application context to the thread function
                 thread = Thread(target=send_async_email, args=[current_app.app_context(), msg])
                 thread.start()
-                logging.info(f"Password reset email queued for {email}")
+                logging.info(f"Password reset email queued for background sending to {email}")
 
-            except Exception as e: # Catch errors during token/email process
+            except Exception as e:
+                # Log errors during token generation or email queuing
                 logging.error(f"ERROR generating token or queueing email for {email}: {e}", exc_info=True)
-                # Fall through to generic flash message for security
+                # IMPORTANT: Do not flash a specific error here to avoid revealing internal issues
+                # The code will fall through to the generic success message below
 
         elif not user:
-            logging.info(f"Password reset requested for non-existent email: {email}")
-            # Do not reveal user existence
+            # Log the attempt for a non-existent email but don't inform the requester
+            logging.info(f"Password reset requested for non-existent email address: {email}")
 
-        # Flash the same message regardless of user existence or internal errors
-        flash('If an account with that email exists, instructions to reset your password have been sent.', 'info')
+        # --- 4. Show Generic Confirmation Message ---
+        # Always flash the same message regardless of whether the user exists
+        # or if an internal error occurred during email sending.
+        # This prevents attackers from probing for valid email addresses.
+        flash('If an account with that email address exists, instructions have been sent. Please also check your spam or junk folder.', 'info')
+        # Redirect to the login page after processing the request
         return redirect(url_for('login'))
 
-    # Handle GET request
+    # --- Handle GET Request ---
+    # Show the forgot password form initially
     return render_template('forgot_password.html', form=form)
 
 
