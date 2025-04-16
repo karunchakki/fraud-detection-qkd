@@ -1832,15 +1832,28 @@ def inject_global_vars():
 
 # --- Error Handlers ---
 @app.errorhandler(404)
-def page_not_found(e): user_id = getattr(g, 'user', {}).get('id', 'Anon'); logging.warning(f"404: {request.url} U={user_id} E={e.description}"); return render_template('errors/404.html', error=e), 404
+@app.errorhandler(404)
+def page_not_found(e):
+    # --- MODIFIED USER ID FETCH ---
+    # Check if g.user exists AND is not None before trying to get id
+    user_id = g.user.get('id', 'Anonymous') if hasattr(g, 'user') and g.user else 'Anonymous'
+    # --- END MODIFICATION ---
+    logging.warning(f"404 Not Found: URL={request.url}, User={user_id}, Error={e.description}")
+    return render_template('errors/404.html', error=e), 404
+
 @app.errorhandler(403)
 def forbidden(e): user_id = getattr(g, 'user', {}).get('id', 'Anon'); logging.warning(f"403: {request.url} U={user_id} E={e.description}"); return render_template('errors/403.html', error=e), 403
+
 @app.errorhandler(500)
-@app.errorhandler(Exception)
+@app.errorhandler(Exception) # Catch other unhandled exceptions
 def internal_server_error(e):
-    original_exception = getattr(e, "original_exception", e); user_id = getattr(g, 'user', {}).get('id', 'Anon')
-    logging.error(f"500: {request.url} U={user_id} E={original_exception}", exc_info=original_exception)
-    # Rollback attempt removed as direct DB connection management in g is not standard
+    original_exception = getattr(e, "original_exception", e) # Get original exception
+    # --- MODIFIED USER ID FETCH ---
+    # Check if g.user exists AND is not None before trying to get id
+    user_id = g.user.get('id', 'Anonymous') if hasattr(g, 'user') and g.user else 'Anonymous'
+    # --- END MODIFICATION ---
+    logging.error(f"500 Internal Server Error: URL={request.url}, User={user_id}, Error={original_exception}", exc_info=original_exception)
+    # ... (rest of the handler) ...
     return render_template('errors/500.html', error=original_exception), 500
 
 # --- Main execution block ---
