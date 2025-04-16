@@ -16,3 +16,5 @@ gunicorn>=20.0.0 # Good alternative to waitress, often used with Nginx
 Flask-WTF>=1.0.0
 WTForms>=3.0.0
 email-validator>=2.0.0
+qiskit>=1.0.0 # Or a specific recent version if needed
+qiskit-aer>=0.13.0 # If using the Aer simulator
