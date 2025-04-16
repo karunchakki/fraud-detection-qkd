@@ -5,7 +5,7 @@
 {% block content %}
     <h2 class="text-3xl font-semibold text-gray-800 mb-6">Account Dashboard</h2>
 
-    <!-- Status Boxes (Only Fraud Alert now) -->
+    <!-- Status Boxes (Fraud Alert) -->
     <div class="mb-8">
         <!-- Fraud Alert Box -->
         {% if show_fraud_alert %}
@@ -42,7 +42,7 @@
                     <tr>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ acc.account_id }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800">{{ acc.customer_name }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-700">₹ {{ "%.2f"|format(acc.balance) }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-700">₹{{ "%.2f"|format(acc.balance) }}</td> {# <-- Already had Rupee symbol #}
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -58,60 +58,149 @@
     <!-- Transaction Input Form -->
     <h3 class="text-xl font-semibold text-gray-700 mb-5 border-b pb-2">Perform Secure Transfer</h3>
     {% if user_accounts and receiver_accounts %}
-        <form action="{{ url_for('transfer_funds') }}" method="post" novalidate class="space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- From Account -->
+
+        {# Check if WTForms is enabled and the form object exists #}
+        {% if are_forms_enabled and transfer_form %}
+            {# --- Render Form using WTForms --- #}
+            <form action="{{ url_for('transfer_funds') }}" method="post" novalidate class="space-y-6">
+                {# *** ADD CSRF TOKEN (Crucial Fix) *** #}
+                {{ transfer_form.hidden_tag() }}
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- From Account (Not part of WTForm, selected implicitly) -->
+                     <div>
+                        <label for="display_sender_account" class="block text-sm font-medium text-gray-700 mb-1">From Your Account:</label>
+                        <input type="text" id="display_sender_account" disabled
+                               value="{{ user_accounts[0].account_id }} - (Bal: ₹{{ "%.2f"|format(user_accounts[0].balance) }})" {# <-- Changed $ to ₹ #}
+                               class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 bg-gray-100 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                        {# Hidden input to actually send the sender ID #}
+                        <input type="hidden" name="sender_account_id" value="{{ user_accounts[0].account_id }}">
+                    </div>
+
+
+                    <!-- To Account (Using WTForms rendering) -->
+                    <div>
+                        <label for="{{ transfer_form.receiver_account_id.id }}" class="block text-sm font-medium text-gray-700 mb-1">{{ transfer_form.receiver_account_id.label }}</label>
+                        {# Render the select field using WTForms #}
+                        {{ transfer_form.receiver_account_id(class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm") }}
+                        {# Display WTForms validation errors #}
+                        {% if transfer_form.receiver_account_id.errors %}
+                            <div class="mt-1 text-xs text-red-600">
+                                {{ transfer_form.receiver_account_id.errors|join(' ') }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                     <!-- Amount (Using WTForms rendering) -->
+                     <div>
+                        <label for="{{ transfer_form.amount.id }}" class="block text-sm font-medium text-gray-700 mb-1">{{ transfer_form.amount.label }} (INR)</label> {# <-- Added (INR) for clarity #}
+                         {# Render the amount field using WTForms #}
+                        {{ transfer_form.amount(class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm", placeholder="e.g., ₹500.00") }} {# <-- Changed $ to ₹ in placeholder #}
+                        {# Display WTForms validation errors #}
+                        {% if transfer_form.amount.errors %}
+                            <div class="mt-1 text-xs text-red-600">
+                                {{ transfer_form.amount.errors|join(' ') }}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Simulate Eve Checkbox -->
+                <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200">
+                    {# Assuming 'simulate_eve' is part of your TransferForm definition #}
+                    {# Render the checkbox using WTForms if it exists in the form #}
+                    {% if transfer_form.simulate_eve %}
+                        {{ transfer_form.simulate_eve(class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2") }}
+                        <label for="{{ transfer_form.simulate_eve.id }}" class="text-sm font-medium text-gray-700">
+                            {{ transfer_form.simulate_eve.label }}
+                            <span class="text-xs text-gray-500">(Increases QKD errors, may abort transfer)</span>
+                        </label>
+                        {% if transfer_form.simulate_eve.errors %}
+                            <div class="mt-1 text-xs text-red-600">
+                                {{ transfer_form.simulate_eve.errors|join(' ') }}
+                            </div>
+                        {% endif %}
+                    {% else %}
+                         {# Fallback if simulate_eve not in WTForm #}
+                         <input type="checkbox" id="simulate_eve_transfer_wt" name="simulate_eve" value="true"
+                                class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
+                         <label for="simulate_eve_transfer_wt" class="text-sm font-medium text-gray-700">
+                            Simulate Eavesdropper (Eve)?
+                            <span class="text-xs text-gray-500">(Increases QKD errors, may abort transfer)</span>
+                         </label>
+                    {% endif %}
+                </div>
+
+
+                <!-- Submit Button (Using WTForms rendering) -->
                 <div>
-                    <label for="sender_account_id" class="block text-sm font-medium text-gray-700 mb-1">From Your Account:</label>
-                    <select id="sender_account_id" name="sender_account_id" required
-                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
-                        <option value="" disabled selected>Select Account</option>
-                        {% for acc in user_accounts %}
-                        <option value="{{ acc.account_id }}">{{ acc.account_id }} - (Bal: {{ "%.2f"|format(acc.balance) }})</option>
-                        {% endfor %}
-                    </select>
+                     {# Render the submit button using WTForms #}
+                    {{ transfer_form.submit(class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out") }}
+                </div>
+            </form>
+
+        {% else %}
+            {# --- Fallback: Render Form Manually if WTForms is not available --- #}
+            {# WARNING: This manual form lacks CSRF protection! #}
+            <form action="{{ url_for('transfer_funds') }}" method="post" class="space-y-6">
+                 <p class="text-sm text-orange-600 bg-orange-50 p-3 rounded border border-orange-200">Note: Advanced form features (like CSRF protection) are disabled.</p>
+                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- From Account (Manual) -->
+                    <div>
+                        <label for="sender_account_id" class="block text-sm font-medium text-gray-700 mb-1">From Your Account:</label>
+                        <select id="sender_account_id" name="sender_account_id" required
+                                class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                            <option value="" disabled selected>Select Account</option>
+                            {% for acc in user_accounts %}
+                             {# Display balance with Rupee symbol in manual dropdown #}
+                            <option value="{{ acc.account_id }}">{{ acc.account_id }} - (Bal: ₹{{ "%.2f"|format(acc.balance) }})</option> {# <-- Changed $ to ₹ #}
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- To Account (Manual) -->
+                    <div>
+                        <label for="receiver_account_id" class="block text-sm font-medium text-gray-700 mb-1">To Account:</label>
+                         <select id="receiver_account_id" name="receiver_account_id" required
+                                class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                            <option value="" disabled selected>Select Receiver</option> {# Ensure value="" for placeholder #}
+                             {% for acc in receiver_accounts %}
+                            <option value="{{ acc.account_id }}">{{ acc.account_id }} - {{ acc.customer_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                     <!-- Amount (Manual) -->
+                     <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">Amount (INR):</label>
+                        <input type="text" id="amount" name="amount" placeholder="e.g., ₹500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount (e.g., 500 or 500.00)" {# <-- Changed placeholder, simplified pattern slightly #}
+                               class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    </div>
+                 </div>
+
+                 <!-- Simulate Eve Checkbox (Manual) -->
+                <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200">
+                    <input type="checkbox" id="simulate_eve_transfer" name="simulate_eve" value="true"
+                           class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
+                    <label for="simulate_eve_transfer" class="text-sm font-medium text-gray-700">
+                        Simulate Eavesdropper (Eve)?
+                        <span class="text-xs text-gray-500">(Increases QKD errors, may abort transfer)</span>
+                    </label>
                 </div>
 
-                <!-- To Account -->
+                <!-- Submit Button (Manual) -->
                 <div>
-                    <label for="receiver_account_id" class="block text-sm font-medium text-gray-700 mb-1">To Account:</label>
-                     <select id="receiver_account_id" name="receiver_account_id" required
-                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
-                        <option value="" disabled selected>Select Receiver</option>
-                         {% for acc in receiver_accounts %}
-                        <option value="{{ acc.account_id }}">{{ acc.account_id }} - {{ acc.customer_name }}</option>
-                        {% endfor %}
-                    </select>
+                    <button type="submit" class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                           <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                         </svg>
+                        Initiate Secure Transfer
+                    </button>
                 </div>
+            </form>
+        {% endif %}
 
-                 <!-- Amount -->
-                 <div>
-                    <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">Amount (INR):</label>
-                    <input type="text" id="amount" name="amount" placeholder="e.g., 500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount, e.g., 123.45"
-                           class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                </div>
-            </div>
-
-            <!-- Simulate Eve Checkbox -->
-            <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200">
-                <input type="checkbox" id="simulate_eve_transfer" name="simulate_eve" value="true"
-                       class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
-                <label for="simulate_eve_transfer" class="text-sm font-medium text-gray-700">
-                    Simulate Eavesdropper (Eve)?
-                    <span class="text-xs text-gray-500">(Increases QKD errors, may abort transfer)</span>
-                </label>
-            </div>
-
-            <!-- Submit Button -->
-            <div>
-                <button type="submit" class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
-                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                     </svg>
-                    Initiate Secure Transfer
-                </button>
-            </div>
-        </form>
+    {# --- Messages for when transfers are not possible --- #}
     {% elif not user_accounts %}
          <p class="text-center text-gray-500 my-4">You need an account to send funds.</p>
     {% else %}
@@ -135,6 +224,11 @@
             {% if last_transfer_outcome.reason %}
                  <p class="text-sm mb-2"><span class="font-semibold">Reason:</span> {{ last_transfer_outcome.reason }}</p>
             {% endif %}
+
+             {# Display amount if present in outcome #}
+             {% if last_transfer_outcome.amount %}
+                  <p class="text-sm mb-2"><span class="font-semibold">Attempted Amount:</span> ₹{{ last_transfer_outcome.amount }}</p> {# <-- Added Rupee symbol #}
+             {% endif %}
 
             {# Show QKD specific info if available #}
             {% if last_transfer_outcome.qber is defined %}
@@ -165,7 +259,8 @@
             {% if last_transfer_outcome.log_id %}
                  <p class="text-sm mb-1"><span class="font-semibold">Log ID:</span> {{ last_transfer_outcome.log_id }}
                      <a href="{{ url_for('history') }}" class="text-indigo-600 hover:underline text-xs ml-2">(View History)</a>
-                     <a href="{{ url_for('show_report_page', log_id=last_transfer_outcome.log_id) }}" class="text-indigo-600 hover:underline text-xs ml-2">(View PDF Report)</a>
+                     {# Updated link to point to the report display page first #}
+                     <a href="{{ url_for('show_report_page', log_id=last_transfer_outcome.log_id) }}" class="text-indigo-600 hover:underline text-xs ml-2">(View Report Details)</a>
                  </p>
             {% endif %}
 

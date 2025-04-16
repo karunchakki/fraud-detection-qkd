@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-{# Background color removed from html tag to allow potential page-specific backgrounds or if body controls it #}
-<html lang="en" class="h-full">
+{# Applying theme class based on localStorage or default #}
+<html lang="en" class="h-full light"> {# Default to light mode, JS will update #}
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Quantum Secure Bank{% endblock %} - QSB Portal</title>
+    <title>{% block title %}QSB Portal{% endblock %}</title>
 
-    {# ---- Favicon ---- #}
+    {# ---- Favicon (Optional - uncomment and provide files if you have them) ---- #}
     {# <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon.svg') }}"> #}
     {# <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32x32.png') }}"> #}
 
@@ -18,188 +18,256 @@
     {# ---- Tailwind CSS ---- #}
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
+      // Tailwind Config - Apply dark mode based on class
       tailwind.config = {
         theme: {
           extend: {
             fontFamily: {
-              sans: ['Inter', 'system-ui', 'sans-serif'],
+              // Use Inter as the primary sans-serif font
+              sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
             },
-            colors: {
-              primary: { // Example: Dark Slate/Gray
-                '50': '#F8FAFC', '100': '#F1F5F9', '200': '#E2E8F0', '300': '#CBD5E1', '400': '#94A3B8', '500': '#64748B', '600': '#475569', '700': '#334155', '800': '#1E293B', '900': '#0F172A', '950': '#020617'
-              },
-              accent: { // Example: Teal/Cyan
-                '50': '#ECFEFF', '100': '#CFFAFE', '200': '#A5F3FC', '300': '#67E8F9', '400': '#22D3EE', '500': '#06B6D4', '600': '#0891B2', '700': '#0E7490', '800': '#155E75', '900': '#164E63', '950': '#083344'
-              },
-              neutral: { // Standard grays (maps to Tailwind's default 'gray')
-                '50': '#F9FAFB', '100': '#F3F4F6', '200': '#E5E7EB', '300': '#D1D5DB', '400': '#9CA3AF', '500': '#6B7280', '600': '#4B5563', '700': '#374151', '800': '#1F2937', '900': '#111827', '950': '#030712',
-              }
+            colors: { // Define your color palette for easy reference
+              primary: { '50': '#F8FAFC', '100': '#F1F5F9', '200': '#E2E8F0', '300': '#CBD5E1', '400': '#94A3B8', '500': '#64748B', '600': '#475569', '700': '#334155', '800': '#1E293B', '900': '#0F172A', '950': '#020617' },
+              accent: { '50': '#ECFEFF', '100': '#CFFAFE', '200': '#A5F3FC', '300': '#67E8F9', '400': '#22D3EE', '500': '#06B6D4', '600': '#0891B2', '700': '#0E7490', '800': '#155E75', '900': '#164E63', '950': '#083344' },
+              neutral: { '50': '#F9FAFB', '100': '#F3F4F6', '200': '#E5E7EB', '300': '#D1D5DB', '400': '#9CA3AF', '500': '#6B7280', '600': '#4B5563', '700': '#374151', '800': '#1F2937', '900': '#111827', '950': '#030712', }
+              // Add more colors like success, warning, danger if needed
             }
           }
         },
+         darkMode: 'class', // Enable class-based dark mode
+      }
+      // Apply theme immediately based on localStorage to prevent Flash of Unstyled Content (FOUC)
+      if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark')
+      } else {
+        document.documentElement.classList.remove('dark')
       }
     </script>
 
-    {# ---- Custom Stylesheet ---- #}
+    {# ---- YOUR Custom Stylesheet (Loads AFTER Tailwind) ---- #}
+    {# This allows you to override Tailwind defaults or add custom component styles #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
     {# ---- Page-Specific Head Elements ---- #}
     {% block head_extra %}{% endblock %}
-
 </head>
-<body class="h-full font-sans leading-normal tracking-normal flex flex-col text-neutral-800 bg-neutral-100">
 
-    <!-- Header Navigation -->
-    <nav class="bg-primary-800 shadow-md sticky top-0 z-50 border-b border-primary-700">
-       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-16">
-                <!-- Logo/Brand -->
-                <div class="flex-shrink-0">
-                    <a href="{{ url_for('index') }}" class="text-white hover:text-accent-300 transition-colors duration-200 ease-in-out text-xl font-bold flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mr-2 inline-block text-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                           <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 21v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m0 0h4.5V3.545M12.75 21h7.5V10.75M2.25 21h1.5m18 0h-18M2.25 9l4.5-1.636M18.75 3l-1.5.545m0 6.205l3 1m1.5.5l-1.5-.5M6.75 7.364l-1.5 .545m0 0l-3-1m-1.5-.5l1.5.5m7.5-3l-4.5-1.636M6.75 7.364l6-2.182m0 0l6 2.182M12 12.75a4.5 4.5 0 110-9 4.5 4.5 0 010 9z" />
-                        </svg>
-                        QSB Portal
+<body class="h-full font-sans antialiased bg-neutral-100 dark:bg-primary-950 text-neutral-800 dark:text-neutral-200">
+
+{# Main Flex Container for Sidebar + Content #}
+<div class="flex h-screen overflow-hidden">
+
+    {# --- Sidebar Navigation (Desktop - hidden on small screens) --- #}
+    {# Added id="desktop-sidebar", fixed positioning for mobile overlay, transforms, transitions #}
+    <aside id="desktop-sidebar"
+           class="fixed inset-y-0 left-0 z-40 flex flex-shrink-0 w-64 flex-col border-r border-neutral-200 dark:border-primary-800 bg-white dark:bg-primary-900
+                  transform -translate-x-full transition-transform duration-300 ease-in-out {# Start hidden off-screen on mobile #}
+                  lg:relative lg:translate-x-0 lg:flex {# Always visible and in place on large screens #}
+                  ">
+        <div class="flex flex-col flex-grow pt-5 pb-4 overflow-y-auto">
+            {# Sidebar Header / Logo #}
+            <div class="flex items-center flex-shrink-0 px-4 mb-5">
+                <a href="{{ url_for('index') }}" class="text-primary-800 dark:text-white hover:text-accent-500 dark:hover:text-accent-300 transition-colors duration-200 ease-in-out text-xl font-bold flex items-center">
+                    {# Placeholder Logo SVG #}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 mr-2 inline-block text-accent-500 dark:text-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"> <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 21v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m0 0h4.5V3.545M12.75 21h7.5V10.75M2.25 21h1.5m18 0h-18M2.25 9l4.5-1.636M18.75 3l-1.5.545m0 6.205l3 1m1.5.5l-1.5-.5M6.75 7.364l-1.5 .545m0 0l-3-1m-1.5-.5l1.5.5m7.5-3l-4.5-1.636M6.75 7.364l6-2.182m0 0l6 2.182M12 12.75a4.5 4.5 0 110-9 4.5 4.5 0 010 9z" /> </svg>
+                    QSB Portal
+                </a>
+            </div>
+            {# Sidebar Nav Links #}
+            <nav class="mt-5 flex-1 px-2 space-y-1" id="desktop-nav-links">
+                {# Define CSS classes for reuse #}
+                {% set base_class = 'group flex items-center px-3 py-2.5 text-sm font-medium rounded-md transition-colors duration-150 ease-in-out' %}
+                {% set normal_class = 'text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-primary-800 hover:text-neutral-900 dark:hover:text-white' %}
+                {% set active_class = 'bg-neutral-100 dark:bg-primary-800 text-neutral-900 dark:text-white' %}
+                {% set icon_base = 'mr-3 flex-shrink-0 h-5 w-5' %}
+                {% set icon_normal = 'text-neutral-400 dark:text-neutral-500 group-hover:text-neutral-500 dark:group-hover:text-neutral-400' %}
+                {% set icon_active = 'text-neutral-500 dark:text-neutral-300' %}
+
+                {# Links visible when logged in #}
+                {% if session_user %}
+                    <a href="{{ url_for('index') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'index' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'index' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
+                        Dashboard
                     </a>
-                </div>
-
-                <!-- Navigation Links (Desktop) -->
-                <div class="hidden md:block">
-                   <div class="ml-10 flex items-center space-x-4">
-                        {% if session_user %}
-                            <a href="{{ url_for('index') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'index' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Dashboard</a>
-                            <a href="{{ url_for('history') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'history' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">History</a>
-                            <a href="{{ url_for('qkd_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'qkd_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">QKD Sim</a>
-                            <a href="{{ url_for('fraud_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'fraud_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Fraud Report</a>
-                            {# *** ADDED RISK ANALYSIS LINK HERE *** #}
-                            <a href="{{ url_for('risk_analysis_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'risk_analysis_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Risk Analysis</a>
-                            {# *** END ADDED LINK *** #}
-                            <a href="{{ url_for('quantum_impact') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'quantum_impact' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Quantum Impact</a>
-                            <a href="{{ url_for('about') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'about' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">About</a>
-                            <div class="flex items-center pl-4 ml-4 border-l border-primary-700 space-x-4">
-                                <span class="text-neutral-300 text-sm font-medium" title="Logged in as {{ session_user.email }}">{{ session_user.name }}</span>
-                                <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Logout</a>
-                            </div>
-                        {% else %}
-                            <a href="{{ url_for('quantum_impact') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'quantum_impact' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Quantum Impact</a>
-                            <a href="{{ url_for('about') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'about' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">About</a>
-                            <a href="{{ url_for('login') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'login' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Login</a>
-                            <a href="{{ url_for('register_customer') }}" class="bg-accent-600 hover:bg-accent-500 text-white px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150 ease-in-out">Register</a>
-                        {% endif %}
+                    <a href="{{ url_for('history') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'history' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'history' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        History
+                    </a>
+                     <a href="{{ url_for('qkd_page') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'qkd_page' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'qkd_page' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" /></svg>
+                        QKD Sim
+                    </a>
+                     <a href="{{ url_for('fraud_page') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'fraud_page' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'fraud_page' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0-10.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>
+                        Fraud Report
+                    </a>
+                    <a href="{{ url_for('risk_analysis_page') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'risk_analysis_page' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'risk_analysis_page' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28a11.95 11.95 0 00-5.814 5.519l-4.306-4.307L18 3.75M3 18h18" /></svg>
+                        Risk Analysis
+                    </a>
+                     <a href="{{ url_for('quantum_impact') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'quantum_impact' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'quantum_impact' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-.441-.175-.86-.488-1.173A1.911 1.911 0 0013.5 2.25c-.441 0-.86.175-1.173.488a1.911 1.911 0 00-.488 1.173c0 .369.128.713.349 1.003.215.283.401.604.401.959v.316a9.709 9.709 0 01-5.63 8.482.754.754 0 01-.8-.04 9.7 9.7 0 01-5.63-8.482v-.316c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-.441-.175-.86-.488-1.173A1.911 1.911 0 002.25 2.25c-.441 0-.86.175-1.173.488a1.911 1.911 0 00-.488 1.173c0 .369.128.713.349 1.003.215.283.401.604.401.959v7.688a1.875 1.875 0 001.875 1.875h13.5a1.875 1.875 0 001.875-1.875v-7.688z" /></svg>
+                        Quantum Impact
+                    </a>
+                     <a href="{{ url_for('about') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'about' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'about' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                        About
+                    </a>
+                {# Links visible when logged out #}
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'login' else normal_class }}">
+                         <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'login' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
+                         Login
+                    </a>
+                    <a href="{{ url_for('register_customer') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'register_customer' else normal_class }}">
+                         <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'register_customer' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" /></svg>
+                         Register
+                    </a>
+                     <a href="{{ url_for('quantum_impact') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'quantum_impact' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'quantum_impact' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-.441-.175-.86-.488-1.173A1.911 1.911 0 0013.5 2.25c-.441 0-.86.175-1.173.488a1.911 1.911 0 00-.488 1.173c0 .369.128.713.349 1.003.215.283.401.604.401.959v.316a9.709 9.709 0 01-5.63 8.482.754.754 0 01-.8-.04 9.7 9.7 0 01-5.63-8.482v-.316c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-.441-.175-.86-.488-1.173A1.911 1.911 0 002.25 2.25c-.441 0-.86.175-1.173.488a1.911 1.911 0 00-.488 1.173c0 .369.128.713.349 1.003.215.283.401.604.401.959v7.688a1.875 1.875 0 001.875 1.875h13.5a1.875 1.875 0 001.875-1.875v-7.688z" /></svg>
+                        Quantum Impact
+                    </a>
+                     <a href="{{ url_for('about') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'about' else normal_class }}">
+                        <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'about' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                        About
+                    </a>
+                {% endif %}
+            </nav>
+        </div>
+        {# Sidebar Footer with User Info and Theme Toggle #}
+        <div class="flex-shrink-0 flex border-t border-neutral-200 dark:border-primary-800 p-4">
+             <div class="flex-shrink-0 w-full group block">
+                <div class="flex items-center">
+                    {# User Info (if logged in) #}
+                    {% if session_user %}
+                    <div class="flex-grow">
+                         <p class="text-sm font-medium text-neutral-700 dark:text-neutral-200">{{ session_user.name }}</p>
+                         <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300 truncate" title="{{ session_user.email }}">{{ session_user.email }}</p>
+                         <a href="{{ url_for('logout') }}" class="text-xs font-medium text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300">Logout</a>
                     </div>
-                </div>
-
-                <!-- Mobile Menu Button -->
-                <div class="-mr-2 flex md:hidden">
-                   <button type="button" id="mobile-menu-button" class="bg-primary-800 inline-flex items-center justify-center p-2 rounded-md text-neutral-400 hover:text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-primary-800 focus:ring-white" aria-controls="mobile-menu" aria-expanded="false">
-                        <span class="sr-only">Open main menu</span>
-                        <svg id="menu-icon-open" class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
-                        <svg id="menu-icon-close" class="hidden h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    {% else %}
+                     <div class="flex-grow">
+                         <p class="text-sm font-medium text-neutral-700 dark:text-neutral-200">Guest</p>
+                         <a href="{{ url_for('login') }}" class="text-xs font-medium text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300">Login / Register</a>
+                    </div>
+                    {% endif %}
+                    {# Theme Toggle Button #}
+                    <button id="theme-toggle" type="button" class="ml-2 p-1.5 rounded-md text-neutral-400 hover:text-neutral-500 dark:text-neutral-500 dark:hover:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-primary-900 focus:ring-accent-500">
+                        <span class="sr-only">Toggle dark mode</span>
+                         {# Sun icon for light mode (will be hidden in dark mode by JS) #}
+                         <svg id="theme-toggle-light-icon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path></svg>
+                         {# Moon icon for dark mode (will be hidden in light mode by JS) #}
+                         <svg id="theme-toggle-dark-icon" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path></svg>
                     </button>
                 </div>
-            </div>
-        </div>
-
-        <!-- Mobile menu -->
-        <div class="md:hidden hidden" id="mobile-menu">
-            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-                {% if session_user %}
-                    <a href="{{ url_for('index') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'index' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Dashboard</a>
-                    <a href="{{ url_for('history') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'history' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">History</a>
-                    <a href="{{ url_for('qkd_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'qkd_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">QKD Sim</a>
-                    <a href="{{ url_for('fraud_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'fraud_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Fraud Report</a>
-                     {# *** ADDED RISK ANALYSIS LINK HERE *** #}
-                    <a href="{{ url_for('risk_analysis_page') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'risk_analysis_page' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Risk Analysis</a>
-                    {# *** END ADDED LINK *** #}
-                    <a href="{{ url_for('quantum_impact') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'quantum_impact' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Quantum Impact</a>
-                    <a href="{{ url_for('about') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'about' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">About</a>
-                    <div class="pt-4 pb-3 border-t border-primary-700">
-                        <div class="flex items-center px-5">
-                            <div class="ml-0">
-                                <div class="text-base font-medium leading-none text-white">{{ session_user.name }}</div>
-                                <div class="text-sm font-medium leading-none text-neutral-400 mt-1">{{ session_user.email }}</div>
-                            </div>
-                        </div>
-                        <div class="mt-3 px-2 space-y-1">
-                            <a href="{{ url_for('logout') }}" class="block px-3 py-2 rounded-md text-base font-medium text-red-400 hover:text-white hover:bg-red-600 transition-colors duration-150 ease-in-out">Logout</a>
-                        </div>
-                    </div>
-                {% else %}
-                    <a href="{{ url_for('quantum_impact') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'quantum_impact' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Quantum Impact</a>
-                    <a href="{{ url_for('about') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'about' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">About</a>
-                    <a href="{{ url_for('login') }}" class="{{ 'bg-primary-900 text-white' if request.endpoint == 'login' else 'text-neutral-300 hover:bg-primary-700 hover:text-white' }} block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Login</a>
-                    <a href="{{ url_for('register_customer') }}" class="bg-accent-600 hover:bg-accent-500 text-white block px-3 py-2 rounded-md text-base font-medium transition-colors duration-150 ease-in-out">Register</a>
-                {% endif %}
              </div>
         </div>
-    </nav>
+    </aside>
+    {# --- End Sidebar Navigation --- #}
 
-    <!-- Main Content Area -->
-    <main class="flex-grow w-full py-10">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="bg-white p-6 sm:p-8 md:p-10 rounded-lg shadow-xl border border-neutral-200">
 
-                <!-- Flash Messages Area -->
-                {% block flashes %}
-                    {% include 'partials/_flashes.html' %}
-                {% endblock flashes %}
+    {# --- Mobile Sidebar Overlay --- #}
+    {# This div covers the main content when the mobile sidebar is open #}
+    <div id="sidebar-overlay" class="fixed inset-0 bg-gray-600 bg-opacity-75 z-30 lg:hidden opacity-0 invisible transition-opacity duration-300 ease-linear"></div>
 
-                <!-- Main content block overridden by child templates -->
-                {% block content %}{% endblock %}
 
-            </div> {# End of inner white content container #}
-        </div> {# End of max-width container #}
-    </main>
+    {# --- Main Content Area Wrapper --- #}
+    <div class="flex flex-col flex-1 w-0 overflow-hidden">
 
-    <!-- Footer -->
-    <footer class="bg-primary-800 border-t border-primary-700 text-neutral-400 py-5 mt-auto">
-         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm">
-            <div class="mb-2 space-x-4">
-                <a href="#" class="hover:text-accent-300 transition-colors duration-150">Privacy Policy</a>
-                <span>·</span>
-                <a href="#" class="hover:text-accent-300 transition-colors duration-150">Terms of Service</a>
-                 <span>·</span>
-                <a href="#" class="hover:text-accent-300 transition-colors duration-150">Contact Us</a>
+        {# Top Bar (Mobile Only) - Includes Hamburger Button #}
+        <header class="relative z-30 flex-shrink-0 flex h-16 bg-white dark:bg-primary-900 border-b border-neutral-200 dark:border-primary-800 shadow-sm lg:hidden">
+             {# Mobile Menu Button - Targets sidebar now #}
+            <button type="button" id="mobile-sidebar-button"
+                    class="px-4 border-r border-neutral-200 dark:border-primary-800 text-neutral-500 dark:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500 lg:hidden">
+                <span class="sr-only">Open sidebar</span>
+                <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+            </button>
+            <div class="flex-1 px-4 flex justify-between items-center">
+                 {# Mobile Header Title #}
+                 <a href="{{ url_for('index') }}" class="text-lg font-bold text-primary-800 dark:text-white">QSB Portal</a>
+                 <div>{# Placeholder for potential top-right mobile actions #}</div>
             </div>
-            <p>
-                Quantum-Secure Banking Simulation © <span id="current-year"></span> QSB Demo Project.
-                 <br class="sm:hidden">
-                 For Educational & Demonstration Purposes Only.
-            </p>
-             {# Add constants display to footer if desired #}
-             <p class="text-xs text-neutral-500 mt-2">
-                 QBER Threshold: {{ QBER_THRESHOLD | default('N/A') }} |
-                 Initial Balance: ₹{{ "%.2f"|format(INITIAL_BALANCE | default(0.00)) }}
-             </p>
+        </header>
+
+        {# Main Content - Scrollable Area #}
+        <main class="flex-1 relative z-0 overflow-y-auto focus:outline-none py-6 px-4 sm:px-6 lg:px-8" id="main-content">
+             {# Flash messages are included here #}
+             {% block flashes %}
+                {% include 'partials/_flashes.html' ignore missing %} {# Use ignore missing in case partial doesn't exist #}
+             {% endblock flashes %}
+
+             {# Main content block for child templates #}
+             {% block content %}
+                <p class="dark:text-neutral-300">Welcome to the QSB Portal.</p> {# Default content #}
+             {% endblock %}
+        </main>
+        {# --- End Main Content --- #}
+
+    </div>
+    {# --- End Main Content Area Wrapper --- #}
+
+
+     {# --- Bottom Navigation (Mobile Only) --- #}
+     {# Displayed only on smaller screens (lg:hidden) #}
+    <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white dark:bg-primary-900 border-t border-neutral-200 dark:border-primary-800 shadow-inner z-40">
+        <div class="w-full px-2 h-16 flex items-center justify-around" id="mobile-nav-links">
+             {# Define mobile nav link classes #}
+             {% set mobile_base = 'flex flex-col items-center justify-center text-center text-neutral-500 dark:text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400 w-full h-full px-1 transition-colors duration-150 ease-in-out' %}
+             {% set mobile_active = 'text-accent-600 dark:text-accent-400 border-t-2 border-accent-600 -mt-px' %} {# Active indicator #}
+
+             {# Links shown when logged in #}
+             {% if session_user %}
+                 <a href="{{ url_for('index') }}" class="{{ mobile_base }} {{ mobile_active if request.endpoint == 'index' else '' }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
+                    <span class="text-xs font-medium block">Dashboard</span>
+                 </a>
+                 <a href="{{ url_for('history') }}" class="{{ mobile_base }} {{ mobile_active if request.endpoint == 'history' else '' }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <span class="text-xs font-medium block">History</span>
+                 </a>
+                 {# Transfer Link - Example linking to index page anchor #}
+                 <a href="{{ url_for('index') }}#perform-transfer" class="{{ mobile_base }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" /></svg>
+                    <span class="text-xs font-medium block">Transfer</span>
+                 </a>
+                  <a href="{{ url_for('qkd_page') }}" class="{{ mobile_base }} {{ mobile_active if request.endpoint == 'qkd_page' else '' }}">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" /></svg>
+                     <span class="text-xs font-medium block">QKD Sim</span>
+                 </a>
+                 {# "More" button - requires JS to handle its action (e.g., open sidebar or modal) #}
+                 <button type="button" id="mobile-more-button" class="{{ mobile_base }}">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /></svg>
+                     <span class="text-xs font-medium block">More</span>
+                 </button>
+
+             {# Links shown when logged out #}
+             {% else %}
+                 <a href="{{ url_for('about') }}" class="{{ mobile_base }} {{ mobile_active if request.endpoint == 'about' else '' }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                    <span class="text-xs font-medium block">About</span>
+                 </a>
+                 <a href="{{ url_for('login') }}" class="{{ mobile_base }} {{ mobile_active if request.endpoint == 'login' else '' }}">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
+                    <span class="text-xs font-medium block">Login</span>
+                 </a>
+                  <a href="{{ url_for('register_customer') }}" class="{{ mobile_base }} {{ mobile_active if request.endpoint == 'register_customer' else '' }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" /></svg>
+                    <span class="text-xs font-medium block">Register</span>
+                 </a>
+             {% endif %}
         </div>
-    </footer>
+    </nav>
+    {# --- End Bottom Navigation --- #}
 
-    <!-- Core/Global JavaScript -->
-     <script>
-        // Set current year in footer
-        const yearSpan = document.getElementById('current-year');
-        if (yearSpan) yearSpan.textContent = new Date().getFullYear();
+</div> {# End Main Flex Container #}
 
-        // Mobile menu toggle functionality
-        const menuButton = document.getElementById('mobile-menu-button');
-        const mobileMenu = document.getElementById('mobile-menu');
-        const openIcon = document.getElementById('menu-icon-open');
-        const closeIcon = document.getElementById('menu-icon-close');
-        if (menuButton && mobileMenu && openIcon && closeIcon) {
-            menuButton.addEventListener('click', () => {
-                const isExpanded = menuButton.getAttribute('aria-expanded') === 'true';
-                menuButton.setAttribute('aria-expanded', !isExpanded);
-                mobileMenu.classList.toggle('hidden');
-                openIcon.classList.toggle('hidden'); openIcon.classList.toggle('block');
-                closeIcon.classList.toggle('hidden'); closeIcon.classList.toggle('block');
-            });
-        } else {
-            console.warn('Mobile menu elements not found.');
-        }
-    </script>
 
-    {# Block for other page-specific scripts #}
-    {% block scripts %}{% endblock %}
+{# --- Global JavaScript --- #}
+{# Load your main JS file containing theme toggle and sidebar logic #}
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+{# Block for page-specific scripts to be included by child templates #}
+{% block scripts %}{% endblock %}
 
 </body>
 </html>

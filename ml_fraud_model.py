@@ -1,165 +1,198 @@
 # ml_fraud_model.py
-# Handles loading and predicting with the pre-trained ML fraud model.
+# Handles loading the pre-trained ML fraud detection PIPELINE
+# and making predictions.
 
 import joblib
 import pandas as pd
 import os
 import logging
 import datetime
-from typing import Dict, List, Optional
+from decimal import Decimal # Import Decimal for type checking if needed
+from typing import List, Optional, Tuple, Any
 
 # --- Configuration ---
-MODEL_DIR = os.path.dirname(__file__)
+# Determine directory relative to this file
+MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILENAME = 'fraud_model.joblib'
-FEATURES_FILENAME = 'fraud_model_features.joblib'
-MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME) if MODEL_DIR else MODEL_FILENAME
-FEATURES_PATH = os.path.join(MODEL_DIR, FEATURES_FILENAME) if MODEL_DIR else FEATURES_FILENAME
+FEATURES_FILENAME = 'fraud_model_features.joblib' # Stores the *output* feature names from the preprocessor
+MODEL_PATH = os.path.join(MODEL_DIR, MODEL_FILENAME)
+FEATURES_PATH = os.path.join(MODEL_DIR, FEATURES_FILENAME)
 
 # --- Globals for Loaded Model/Features ---
-_fraud_model = None
-_model_features = None
+# _pipeline stores the entire loaded pipeline (preprocessor + classifier)
+_pipeline = None
+# _output_features stores the feature names *after* preprocessing (e.g., one-hot encoded names)
+_output_features = None
 _model_loaded = False
 
 def load_model() -> bool:
-    """Loads the trained fraud detection model and feature list. Returns True on success."""
-    global _fraud_model, _model_features, _model_loaded
+    """
+    Loads the trained fraud detection pipeline and feature list.
+    Returns True on success, False otherwise.
+    """
+    global _pipeline, _output_features, _model_loaded
     if _model_loaded:
-        logging.debug("ML Model already loaded.")
-        return True # Already loaded
+        logging.debug("ML Pipeline already loaded.")
+        return True
 
     try:
-        logging.info(f"Attempting to load fraud model from: {MODEL_PATH}")
+        logging.info(f"Attempting to load fraud detection pipeline from: {MODEL_PATH}")
         if not os.path.exists(MODEL_PATH):
-             raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
-        _fraud_model = joblib.load(MODEL_PATH)
+             raise FileNotFoundError(f"Model pipeline file not found at {MODEL_PATH}")
+        _pipeline = joblib.load(MODEL_PATH)
+        # Basic check: Does it look like a pipeline?
+        if not hasattr(_pipeline, 'steps'):
+             logging.error(f"Loaded object from {MODEL_PATH} does not appear to be a scikit-learn Pipeline.")
+             raise TypeError("Loaded model is not a Pipeline object.")
 
-        logging.info(f"Attempting to load features from: {FEATURES_PATH}")
+
+        logging.info(f"Attempting to load output feature names from: {FEATURES_PATH}")
         if not os.path.exists(FEATURES_PATH):
-             raise FileNotFoundError(f"Features file not found at {FEATURES_PATH}")
-        _model_features = joblib.load(FEATURES_PATH)
+             raise FileNotFoundError(f"Output features file not found at {FEATURES_PATH}")
+        _output_features = joblib.load(FEATURES_PATH)
+        if not isinstance(_output_features, list):
+             logging.error(f"Features file {FEATURES_PATH} did not contain a list.")
+             raise TypeError("Features file content is not a list.")
+
 
         _model_loaded = True
-        logging.info(f"Fraud detection model and features ({len(_model_features)} features) loaded successfully.")
-        logging.info(f"Model expects features: {_model_features}")
+        logging.info(f"Fraud detection pipeline and output features ({len(_output_features)} features) loaded successfully.")
+        logging.info(f"Model pipeline output feature names: {_output_features}")
         return True
+
     except FileNotFoundError as e:
-        logging.error(f"ML MODEL LOADING FAILED: {e}. Ensure '{MODEL_FILENAME}' and '{FEATURES_FILENAME}' are in the correct directory relative to the running script.")
-        _fraud_model = None; _model_features = None; _model_loaded = False
+        logging.error(f"ML PIPELINE LOADING FAILED: {e}. Ensure '{MODEL_FILENAME}' and '{FEATURES_FILENAME}' are in the same directory as this script.")
+        _pipeline = None; _output_features = None; _model_loaded = False
         return False
     except Exception as e:
-        logging.error(f"Error loading fraud model: {e}", exc_info=True)
-        _fraud_model = None; _model_features = None; _model_loaded = False
+        logging.error(f"Error loading fraud detection pipeline: {e}", exc_info=True)
+        _pipeline = None; _output_features = None; _model_loaded = False
         return False
 
 def is_ml_model_loaded() -> bool:
-    """Checks if the ML model has been loaded successfully."""
-    return _model_loaded and _fraud_model is not None and _model_features is not None
+    """Checks if the ML model pipeline has been loaded successfully."""
+    # Check that pipeline exists and has steps, and features list exists
+    return _model_loaded and _pipeline is not None and hasattr(_pipeline, 'steps') and _output_features is not None
 
-def preprocess_input_features(current_transaction: dict, user_history: list) -> Optional[pd.DataFrame]:
+def predict_fraud(transaction_data: dict) -> Tuple[int, Optional[float]]:
     """
-    Prepares the input features DataFrame for the ML model prediction.
+    Preprocesses transaction data using the loaded pipeline and predicts fraud.
 
     Args:
-        current_transaction: Dict with 'amount' (Decimal/float), 'timestamp' (datetime).
-        user_history: List of recent transaction dicts with 'amount' (Decimal/float), 'timestamp' (datetime).
-                      (Sorted newest first).
+        transaction_data (dict): Dictionary containing the raw features needed
+                                 by the *start* of the training pipeline
+                                 (e.g., 'amount', 'time_of_day', 'location_risk', 'transaction_type').
+                                 Must also contain 'timestamp' if time_of_day needs calculation.
 
     Returns:
-        A pandas DataFrame with one row and columns matching _model_features,
-        or None if features cannot be calculated or model not loaded.
+        tuple: (prediction, probability)
+               prediction (int): 0 for non-fraud, 1 for fraud.
+               probability (float or None): Fraud probability score (0.0 to 1.0),
+                                            or None if prediction fails or model
+                                            doesn't support predict_proba.
+               Returns (0, None) if the model isn't loaded or preprocessing/prediction fails.
     """
-    logging.debug(f"Entering preprocess_input_features...")
+    global _pipeline, _output_features # Use the loaded global objects
+
     if not is_ml_model_loaded():
-        logging.error("ML Model not loaded, cannot preprocess features.")
-        return None
+        logging.error("Fraud model pipeline or features not loaded. Cannot predict.")
+        return (0, None) # Default to non-fraud if model unavailable
+
+    logging.debug(f"Received transaction data for prediction: {transaction_data}")
+    df_input = None # Define df_input outside try for logging in except block
 
     try:
-        features = {}
-        now = current_transaction.get('timestamp', datetime.datetime.now())
-        logging.debug(f"Preprocessing features: Current Tx Amount={current_transaction.get('amount')}, History Count={len(user_history)}")
+        # 1. Prepare Input DataFrame
+        # Create a copy to avoid modifying the original dict
+        data_dict_processed = transaction_data.copy()
 
-        # --- Feature Engineering (Must MATCH offline training) ---
-        features['TransactionAmount'] = float(current_transaction.get('amount', 0.0))
-        features['TransactionHour'] = now.hour
+        # --- Feature Engineering (if needed before pipeline) ---
+        # Example: Calculate 'time_of_day' from 'timestamp' if required by the *original*
+        # feature list used in train_fraud_model.py's ColumnTransformer.
+        # Let's assume the raw features needed by the *start* of the pipeline are:
+        raw_pipeline_input_features = ['amount', 'time_of_day', 'location_risk', 'transaction_type'] # *** ADJUST THIS TO MATCH YOUR TRAINING ***
 
-        # Calculate TransactionGap (in days)
-        last_txn_time = user_history[0]['timestamp'] if user_history else None
-        if isinstance(last_txn_time, datetime.datetime) and isinstance(now, datetime.datetime):
-             time_diff_seconds = (now - last_txn_time).total_seconds()
-             features['TransactionGap'] = max(0, time_diff_seconds) / (60.0 * 60.0 * 24.0)
+        if 'timestamp' in data_dict_processed and 'time_of_day' in raw_pipeline_input_features:
+            try:
+                # Ensure timestamp is datetime object
+                ts = data_dict_processed['timestamp']
+                if not isinstance(ts, datetime.datetime):
+                    ts = pd.to_datetime(ts) # Attempt conversion
+                data_dict_processed['time_of_day'] = ts.hour
+            except Exception as ts_err:
+                logging.warning(f"Could not derive time_of_day from timestamp '{data_dict_processed.get('timestamp')}', using default 0: {ts_err}", exc_info=True)
+                data_dict_processed['time_of_day'] = 0
+        elif 'time_of_day' not in data_dict_processed and 'time_of_day' in raw_pipeline_input_features:
+             logging.warning("'time_of_day' expected but not found, using default 0.")
+             data_dict_processed['time_of_day'] = 0 # Default if timestamp absent
+
+        # Ensure 'amount' is float/Decimal
+        if 'amount' in raw_pipeline_input_features:
+            try:
+                # Convert amount safely, handle potential None
+                amt = data_dict_processed.get('amount')
+                data_dict_processed['amount'] = float(amt) if amt is not None else 0.0
+            except (ValueError, TypeError) as amt_err:
+                 logging.warning(f"Could not convert amount '{data_dict_processed.get('amount')}' to float, using default 0.0: {amt_err}")
+                 data_dict_processed['amount'] = 0.0
+
+        # Add other necessary type conversions or default values here based on raw_pipeline_input_features
+
+        # Create a single-row DataFrame with columns matching the expected *raw* input features
+        # Add defaults for any missing expected raw features
+        input_for_df = {}
+        for col in raw_pipeline_input_features:
+             if col in data_dict_processed:
+                  input_for_df[col] = data_dict_processed[col]
+             else:
+                  # Provide sensible defaults if a raw feature is missing
+                  logging.warning(f"Raw feature '{col}' missing in input dict for prediction, adding default.")
+                  if col in ['amount', 'time_of_day', 'location_risk']: input_for_df[col] = 0 # Numerical default
+                  elif col in ['transaction_type']: input_for_df[col] = 'UNKNOWN' # Categorical default
+                  else: input_for_df[col] = 0 # Generic default
+
+        # Create the DataFrame using the exact raw feature list order if possible (though pipeline should handle order)
+        df_input = pd.DataFrame([input_for_df])
+        # Ensure columns exist before passing to pipeline
+        df_input = df_input[raw_pipeline_input_features] # Select only the required raw columns
+
+        logging.debug(f"DataFrame prepared for pipeline input:\n{df_input.to_string()}")
+        logging.debug(f"Input dtypes:\n{df_input.dtypes}")
+
+        # 2. Predict using the full pipeline
+        # The pipeline handles both preprocessing (scaler, one-hot) and classification
+        prediction = _pipeline.predict(df_input)[0] # Get the single prediction
+
+        # 3. Get Probability (optional, but recommended)
+        probability = None
+        if hasattr(_pipeline, "predict_proba"):
+            try:
+                # predict_proba usually returns shape (n_samples, n_classes)
+                probabilities = _pipeline.predict_proba(df_input)
+                if probabilities.shape == (1, 2):
+                    probability = probabilities[0][1] # Probability of the positive class (fraud=1)
+                else:
+                    logging.warning(f"Unexpected shape from predict_proba: {probabilities.shape}")
+            except Exception as proba_err:
+                logging.warning(f"Could not get probability: {proba_err}", exc_info=True)
+        elif prediction == 1:
+             probability = 1.0 # Assign max probability if only predict is available and it's fraud
         else:
-             features['TransactionGap'] = 999.0 # Default gap used in training
-        logging.debug(f"Calculated TransactionGap: {features['TransactionGap']:.4f} days")
+             probability = 0.0 # Assign min probability
 
-        # Rolling features (sum/count over last 5 available history points)
-        rolling_window = 5
-        relevant_history = [tx for tx in user_history
-                            if isinstance(tx.get('timestamp'), datetime.datetime) and tx['timestamp'] < now]
-        relevant_history = relevant_history[:rolling_window]
-        amounts_in_window = [float(tx.get('amount', 0.0)) for tx in relevant_history]
-
-        features['sum_5days'] = sum(amounts_in_window)
-        features['count_5days'] = len(amounts_in_window)
-        logging.debug(f"Calculated Rolling Features: sum_5days={features['sum_5days']:.2f}, count_5days={features['count_5days']}")
-
-        # --- Create DataFrame in correct order ---
-        input_data = {}
-        missing_features = []
-        for feature_name in _model_features:
-            if feature_name in features:
-                input_data[feature_name] = features[feature_name]
-            else:
-                missing_features.append(feature_name)
-                input_data[feature_name] = 0 # Defaulting missing feature to 0
-
-        if missing_features:
-             logging.error(f"CRITICAL: Features missing during preprocessing: {missing_features}. Check alignment with training features: {_model_features}")
-             return None
-
-        df_input = pd.DataFrame([input_data], columns=_model_features)
-        logging.debug(f"Returning preprocessed DataFrame:\n{df_input.to_string()}")
-        return df_input
+        logging.info(f"ML Prediction: {prediction}, Probability: {probability:.4f}" if probability is not None else "ML Prediction: {prediction}, Probability: N/A")
+        return int(prediction), probability # Return prediction and probability
 
     except Exception as e:
-        logging.error(f"Error during feature preprocessing for prediction: {e}", exc_info=True)
-        return None
+        # Catch errors during preprocessing within the pipeline or during prediction
+        logging.error(f"ERROR during ML prediction pipeline execution: {e}", exc_info=True)
+        logging.error(f"Input data dictionary: {transaction_data}")
+        if df_input is not None:
+             logging.error(f"DataFrame input to pipeline:\n{df_input.to_string()}")
+        # Default to non-fraud in case of any pipeline error
+        return (0, None)
 
-def predict_fraud_proba(input_df: pd.DataFrame) -> float:
-    """
-    Makes a fraud prediction using the loaded model.
-
-    Args:
-        input_df: A pandas DataFrame with features matching the model's training.
-
-    Returns:
-        The probability of the transaction being fraudulent (float between 0 and 1),
-        or -1.0 if prediction fails or model not loaded.
-    """
-    logging.debug("Entering predict_fraud_proba...")
-    if not is_ml_model_loaded():
-        logging.error("ML Model not loaded, cannot make prediction.")
-        return -1.0
-
-    if input_df is None or input_df.empty:
-         logging.error("Invalid input DataFrame provided for prediction.")
-         return -1.0
-
-    try:
-        logging.debug(f"Predicting fraud probability for input:\n{input_df.to_string()}")
-        # Ensure input_df has the exact columns in the exact order expected by the model
-        input_df_ordered = input_df[_model_features]
-
-        probabilities = _fraud_model.predict_proba(input_df_ordered)
-        if probabilities.shape == (1, 2):
-            fraud_probability = probabilities[0, 1] # Probability of class 1 (fraud)
-            logging.debug(f"Predicted fraud probability: {fraud_probability:.4f}")
-            return float(fraud_probability)
-        else:
-            logging.error(f"Unexpected probability shape from model: {probabilities.shape}")
-            return -1.0
-    except KeyError as e:
-         logging.error(f"Feature mismatch during prediction. Model needs {e}. Input has {list(input_df.columns)}", exc_info=True)
-         return -1.0
-    except Exception as e:
-        logging.error(f"Error during model prediction: {e}", exc_info=True)
-        return -1.0
+# --- Optional: Load model on module import ---
+# load_model()
+# You might prefer to call load_model() explicitly from app.py during startup
+# as done in the previous app.py version.

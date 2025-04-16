@@ -1,97 +1,131 @@
 {% extends "base.html" %}
 
-{% block title %}Transaction History - QKD Secure Bank{% endblock %}
-
-{# Remove the old head_style block #}
+{% block title %}Transaction History - QSB Portal{% endblock %}
 
 {% block content %}
-    <h2 class="text-3xl font-semibold text-gray-800 mb-6 text-center">Transaction Log History</h2>
+    <h2 class="text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-8 text-center">Transaction History</h2>
+
+    {# Placeholder for Filter Controls - To be added later if implementing filtering #}
+    {# <div class="mb-6 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        <p class="text-sm text-gray-600 dark:text-gray-400">Filters (Coming Soon)</p>
+    </div> #}
 
     <!-- Transaction Table -->
     {% if log_entries %}
-    <div class="shadow border-b border-gray-200 rounded-lg overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-200">
+    <div class="shadow-lg border border-neutral-200 dark:border-gray-700 rounded-lg overflow-x-auto"> {# Adjusted dark border #}
+        <table class="min-w-full divide-y divide-neutral-200 dark:divide-gray-700"> {# Adjusted dark divider #}
+            <thead class="bg-neutral-100 dark:bg-gray-800"> {# Adjusted dark background #}
                 <tr>
-                    <th scope="col" class="px-3 py-3 text-center text-xs font-medium text-gray-600 uppercase tracking-wider">Log ID</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Timestamp</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Sender</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Receiver</th>
-                    <th scope="col" class="px-4 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">Amount (INR)</th>
-                    <th scope="col" class="px-4 py-3 text-center text-xs font-medium text-gray-600 uppercase tracking-wider">QKD Status</th>
-                    <th scope="col" class="px-3 py-3 text-center text-xs font-medium text-gray-600 uppercase tracking-wider">QBER</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Decrypted Details</th>
-                    <th scope="col" class="px-3 py-3 text-center text-xs font-medium text-gray-600 uppercase tracking-wider">Flagged?</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Fraud Reason</th>
-                    {# Removed Hex columns for brevity, focus on decrypted output
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Encrypted (Hex)</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">IV (Hex)</th>
-                    #}
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Timestamp</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Type</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Details (Sender/Receiver)</th>
+                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Amount (INR)</th>
+                    <th scope="col" class="px-4 py-3 text-center text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">QKD Status</th>
+                    <th scope="col" class="px-4 py-3 text-center text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Flagged</th> {# Changed header from QBER to Flagged #}
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Flag Reason</th>
+                    <th scope="col" class="px-4 py-3 text-center text-xs font-semibold text-neutral-600 dark:text-neutral-300 uppercase tracking-wider">Actions</th> {# Changed relative to text-center #}
                 </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
+            <tbody class="bg-white dark:bg-gray-900 divide-y divide-neutral-200 dark:divide-gray-700"> {# Adjusted dark background/divider #}
                 {% for entry in log_entries %}
-                <tr class="{% if entry.is_flagged %}bg-red-50 hover:bg-red-100{% else %}hover:bg-gray-50{% endif %}"> {# Highlight flagged rows #}
-                    <td class="px-3 py-4 whitespace-nowrap text-center text-sm font-medium text-gray-700">{{ entry.id }}</td>
-                    <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-600">{{ entry.timestamp }}</td>
-                    <td class="px-4 py-4 text-sm text-gray-800">{{ entry.sender }}</td>
-                    <td class="px-4 py-4 text-sm text-gray-800">{{ entry.receiver }}</td>
-                    <td class="px-4 py-4 whitespace-nowrap text-right text-sm font-mono text-gray-700">₹ {{ entry.amount }}</td>
-                    {# Apply dynamic class based on status #}
-                     {% set status_lower = entry.qkd_status | default('unknown') | lower %}
-                     {% set status_color = 'text-green-600' if 'secured' in status_lower else ('text-red-600' if ('fail' in status_lower or 'exceeded' in status_lower) else ('text-yellow-600' if 'flagged' in status_lower else 'text-gray-600')) %}
-                    <td class="px-4 py-4 whitespace-nowrap text-center text-xs font-semibold {{ status_color }}">
-                        {{ entry.qkd_status | default('N/A') | replace("_", " ") }}
-                    </td>
-                    <td class="px-3 py-4 whitespace-nowrap text-center text-sm font-mono text-gray-600">{{ entry.qber }}</td>
-                    {# Decrypted Details Column #}
-                    <td class="px-4 py-4 text-xs text-gray-700 max-w-xs break-words"> {# max-w-xs helps control width #}
-                        {% if entry.decrypted_details and ('[Encrypted' not in entry.decrypted_details and '[Decryption Failed' not in entry.decrypted_details) %}
-                            <span class="font-mono text-green-700">{{ entry.decrypted_details }}</span>
-                        {% elif '[Decryption Failed' in entry.decrypted_details %}
-                             <span class="font-semibold text-red-600">{{ entry.decrypted_details }}</span>
-                         {% else %}
-                             <span class="text-gray-500 italic">{{ entry.decrypted_details | default('[N/A]') }}</span>
+                 {# Use entry.direction passed from backend if available #}
+                 <tr class="hover:bg-neutral-50 dark:hover:bg-gray-800/50 {{ 'bg-red-50 dark:bg-red-900/30' if entry.is_flagged else ''}}"> {# Adjusted dark flagged bg #}
+
+                    {# Timestamp #}
+                    <td class="px-4 py-4 whitespace-nowrap text-sm text-neutral-600 dark:text-neutral-400">{{ entry.timestamp }}</td>
+
+                    {# Transaction Type (Using entry.direction) #}
+                    <td class="px-4 py-4 whitespace-nowrap text-sm">
+                        {% if entry.direction == "Sent" %}
+                            <span class="text-red-600 dark:text-red-400 font-medium">Sent</span>
+                        {% elif entry.direction == "Received" %}
+                            <span class="text-green-600 dark:text-green-400 font-medium">Received</span>
+                        {% else %}
+                             <span class="text-gray-500 dark:text-gray-400">System</span> {# Handle unknown direction #}
                         {% endif %}
                     </td>
-                    {# Fraud Flagged Column #}
-                    <td class="px-3 py-4 whitespace-nowrap text-center text-sm font-medium">
+
+                    {# Details (Sender/Receiver) - Assuming entry.sender/receiver are pre-formatted strings #}
+                    <td class="px-4 py-4 text-sm text-neutral-800 dark:text-neutral-200 max-w-xs truncate" title="{{ entry.sender if entry.direction == 'Received' else entry.receiver }}">
+                        {% if entry.direction == "Sent" %}
+                            To: {{ entry.receiver }}
+                        {% elif entry.direction == "Received" %}
+                            From: {{ entry.sender }}
+                        {% else %}
+                             {{ entry.sender }} → {{ entry.receiver }} {# Fallback display #}
+                        {% endif %}
+                    </td>
+
+                    {# Amount - Using entry.direction for +/- sign #}
+                    <td class="px-4 py-4 whitespace-nowrap text-right text-sm font-mono {{ 'text-red-700 dark:text-red-400' if entry.direction == 'Sent' else ('text-green-700 dark:text-green-400' if entry.direction == 'Received' else 'text-gray-700 dark:text-gray-300') }}">
+                        {{ '-' if entry.direction == 'Sent' else ('+' if entry.direction == 'Received' else '') }} ₹{{ entry.amount }}
+                    </td>
+
+                    {# QKD Status with color coding and inline QBER #}
+                     {% set status_lower = entry.qkd_status | default('unknown') | lower %}
+                     {% set status_color = 'text-green-700 dark:text-green-400' if 'secured' in status_lower and 'flagged' not in status_lower else ('text-red-700 dark:text-red-400' if ('fail' in status_lower or 'err' in status_lower or 'exceeded' in status_lower) else ('text-yellow-600 dark:text-yellow-400' if 'flagged' in status_lower else 'text-neutral-600 dark:text-neutral-400')) %}
+                    <td class="px-4 py-4 whitespace-nowrap text-center text-xs font-semibold {{ status_color }}">
+                        {{ entry.qkd_status | default('N/A') | replace("_", " ") }}
+                         {% if entry.qber and entry.qber != 'N/A' %}<span class="block text-xs font-normal opacity-80">(QBER: {{ entry.qber }})</span>{% endif %} {# Show QBER inline #}
+                    </td>
+
+                    {# Flagged Badge #}
+                    <td class="px-4 py-4 whitespace-nowrap text-center text-xs font-medium"> {# Adjusted padding #}
                         {% if entry.is_flagged %}
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                <svg class="-ml-0.5 mr-1 h-3 w-3 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                                  <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 3.001-1.742 3.001H4.42c-1.53 0-2.493-1.667-1.743-3.001l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1.75-5.75a.75.75 0 00-1.5 0v3a.75.75 0 001.5 0v-3z" clip-rule="evenodd" />
-                                </svg>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300">
+                                <svg class="-ml-0.5 mr-1 h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 3.001-1.742 3.001H4.42c-1.53 0-2.493-1.667-1.743-3.001l5.58-9.92zM10 13a1 1 0 110-2 1 1 0 010 2zm-1.75-5.75a.75.75 0 00-1.5 0v3a.75.75 0 001.5 0v-3z" clip-rule="evenodd" /></svg>
                                 Yes
                             </span>
                         {% else %}
-                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                               <svg class="-ml-0.5 mr-1 h-3 w-3 text-green-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                               </svg>
+                             <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">
+                               <svg class="-ml-0.5 mr-1 h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
                                 No
                              </span>
                         {% endif %}
                     </td>
-                     {# Fraud Reason Column #}
-                     <td class="px-4 py-4 text-xs text-red-700 max-w-xs break-words">
+
+                     {# Fraud Reason - Allow wrapping #}
+                     <td class="px-4 py-4 text-xs text-neutral-600 dark:text-neutral-400 max-w-[150px] break-words"> {# Constrained width #}
                         {{ entry.fraud_reason | default('--') }}
                      </td>
-                    {# Removed Hex columns for brevity
-                    <td class="px-4 py-4 text-xs text-gray-500 font-mono max-w-xs break-words">{{ entry.encrypted_hex if entry.encrypted_hex != 'N/A' else '--' }}</td>
-                    <td class="px-4 py-4 text-xs text-gray-500 font-mono max-w-xs break-words">{{ entry.iv_hex if entry.iv_hex != 'N/A' else '--'}}</td>
-                    #}
+
+                     {# --- ACTIONS CELL - MODIFIED --- #}
+                     <td class="px-4 py-4 whitespace-nowrap text-center text-sm font-medium space-x-2">
+                         {# Only show report links if the transaction likely succeeded (not failed status) #}
+                         {% if 'FAIL' not in entry.qkd_status|upper and 'ERR' not in entry.qkd_status|upper %}
+                             {# Link to View Details Page #}
+                             <a href="{{ url_for('show_report_page', log_id=entry.id) }}"
+                                class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 hover:underline"
+                                title="View Report Details">View</a>
+                             {# Link to Download PDF #}
+                             <a href="{{ url_for('download_report', log_id=entry.id) }}"
+                                class="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
+                                title="Download PDF Report">PDF</a>
+                         {% else %}
+                             {# Display N/A for failed transactions #}
+                             <span class="text-gray-400 dark:text-gray-500 italic text-xs">N/A</span>
+                         {% endif %}
+                     </td>
+                     {# --- END ACTIONS CELL --- #}
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
     {% else %}
-    <p class="text-center text-gray-500 my-6 p-4 bg-gray-50 rounded-md">No transaction logs found.</p>
+     {# Message when no log entries are found - ensure colspan matches header columns #}
+    <div class="text-center py-10 px-4 bg-white dark:bg-gray-900 border border-neutral-200 dark:border-gray-700 rounded-lg shadow-md">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">No transaction logs found</h3>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Get started by making a transfer from the dashboard.</p>
+    </div>
     {% endif %}
 
     <!-- Navigation back to main page -->
     <div class="mt-8 text-center">
-        <a href="{{ url_for('index') }}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg shadow transition duration-300 text-sm">
+        <a href="{{ url_for('index') }}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-5 rounded-lg shadow-lg hover:shadow-indigo-500/50 transition duration-300 text-sm">
             ← Back to Dashboard
         </a>
     </div>

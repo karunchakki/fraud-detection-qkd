@@ -1,0 +1,30 @@
+{# templates/errors/500.html #}
+{% extends 'base.html' %}
+
+{% block title %}Internal Server Error{% endblock %}
+
+{% block page_title %}500 - Internal Server Error{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 text-center">
+    <div class="max-w-md w-full space-y-8">
+        <div class="bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 sm:p-10">
+            <h2 class="mb-6 text-3xl font-bold text-center text-red-600 dark:text-red-500">
+                Internal Server Error
+            </h2>
+            <p class="text-gray-600 dark:text-gray-400 mb-6">
+                Sorry, something went wrong on our end. We are working to fix the problem. Please try again later.
+            </p>
+             {# Optionally display a generic error message in production,
+                but avoid showing detailed exception 'e' to the end user for security #}
+             {# {% if error %}
+                <p class="text-sm text-gray-500 dark:text-gray-500 mb-6">Error details might be logged for administrators.</p>
+             {% endif %} #}
+            <a href="{{ url_for('index') }}"
+               class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:focus:ring-offset-gray-800 transition duration-150 ease-in-out">
+                Go to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
