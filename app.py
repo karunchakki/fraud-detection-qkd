@@ -501,60 +501,96 @@ def login_required(f):
 
 @app.before_request
 def load_logged_in_user():
+    """
+    Load user data into Flask's 'g' object before each request if logged in.
+    Adapted for PostgreSQL connection handling. Ensures g.user is properly set or None.
+    Includes detailed logging for debugging.
+    """
     user_id = session.get('user_id')
-    g.user = None # Default
-    logging.debug(f"[BeforeRequest] Start. Session user_id: {user_id}") # Log start
+    g.user = None # Always reset g.user at the start of a request
+    logging.debug(f"[BeforeRequest] Start. Session user_id: {user_id}")
 
     if user_id:
-        conn = None; cursor = None
+        conn = None # Initialize connection variable
+        cursor = None # Initialize cursor variable
         try:
-            conn = get_db_connection()
+            # Attempt to get a database connection
+            conn = get_db_connection() # Handles PG/MySQL fallback
+
             if conn:
+                # Proceed only if connection is successful
                 try:
-                    # Use standard cursor here as we access by index below
+                    # Use standard cursor here as we'll access tuple by index
                     cursor = conn.cursor()
                     logging.debug(f"[BeforeRequest] DB Connected. Querying for user_id: {user_id}")
+
+                    # Fetch essential user details (non-sensitive)
                     sql = "SELECT customer_id, customer_name, email FROM customers WHERE customer_id = %s"
                     cursor.execute(sql, (user_id,))
-                    user_data_tuple = cursor.fetchone() # Returns tuple or None
+                    user_data_tuple = cursor.fetchone() # Fetches one row as tuple or None
 
-                    # *** DETAILED LOGGING HERE ***
-                    logging.debug(f"[BeforeRequest] DB Fetch Result for {user_id}: {user_data_tuple}")
+                    # Detailed logging of the fetched data
+                    logging.debug(f"[BeforeRequest] DB Fetch Result for user_id {user_id}: {user_data_tuple}")
 
-                    if user_data_tuple:
-                        # Assign to g.user
-                        g.user = {'id': user_data_tuple[0], 'name': user_data_tuple[1], 'email': user_data_tuple[2]}
-                        session.permanent = True # Refresh session
-                        # *** LOG SUCCESSFUL ASSIGNMENT ***
+                    if user_data_tuple and len(user_data_tuple) >= 3: # Check if tuple is not None and has enough elements
+                        # User found in database, populate g.user with a standard dict using tuple indices
+                        g.user = {
+                            'id': user_data_tuple[0],    # customer_id
+                            'name': user_data_tuple[1],  # customer_name
+                            'email': user_data_tuple[2]  # email
+                        }
+                        session.permanent = True # Refresh session lifetime on user activity
+                        # Log successful assignment for debugging
                         logging.info(f"[BeforeRequest] Successfully set g.user for user_id {user_id}: {g.user}")
                     else:
-                        # User ID in session but not found in DB
-                        logging.warning(f"[BeforeRequest] User {user_id} in session NOT FOUND in DB. Clearing session.")
-                        session.clear()
-                        g.user = None # Explicitly ensure g.user is None
+                        # User ID was in session, but no matching/valid user tuple in DB
+                        if user_data_tuple is None:
+                             logging.warning(f"[BeforeRequest] User {user_id} in session NOT FOUND in DB. Clearing session.")
+                        else:
+                             logging.warning(f"[BeforeRequest] User {user_id} data fetched from DB is invalid/incomplete: {user_data_tuple}. Clearing session.")
+                        session.clear() # Clear the invalid session data
+                        g.user = None # Explicitly ensure g.user remains None
 
-                except DBError as e:
+                except DBError as e: # Catch PostgreSQL specific errors during query/fetch
                     logging.error(f"[BeforeRequest] DBError loading session user {user_id}: {e}")
                     g.user = None # Ensure g.user is None on DB error
-                except Exception as e:
+                except IndexError as e: # Catch potential errors accessing tuple indices
+                     logging.error(f"[BeforeRequest] IndexError processing user data tuple for user {user_id}: {e}. Data: {user_data_tuple}")
+                     g.user = None
+                except Exception as e: # Catch other unexpected errors during DB interaction
                     logging.error(f"[BeforeRequest] Unexpected error loading user {user_id}: {e}", exc_info=True)
                     g.user = None
                 finally:
-                    if cursor: try: cursor.close() except DBError: pass
-                    # Close connection obtained ONLY in this function
-                    if conn: close_db_connection(conn)
+                    # Cleanup cursor and connection for this specific DB interaction
+                    if cursor:
+                        # *** Corrected Finally Block for Cursor ***
+                        try:
+                            cursor.close()
+                        except DBError: pass # Ignore DB specific close error
+                        except Exception as cur_e: logging.warning(f"[BeforeRequest] Unexpected error closing session cursor: {cur_e}")
+                        # *** End Correction ***
+                    # Close connection obtained within this function block
+                    if conn: # Check if conn object was successfully created
+                        close_db_connection(conn)
             else:
-                # get_db_connection failed
-                logging.error("[BeforeRequest] DB connection failed. Clearing session.")
-                session.clear()
+                # get_db_connection() returned None (failed to connect)
+                logging.error("[BeforeRequest] DB connection failed. Cannot verify user session. Clearing session.")
+                session.clear() # Clear session for safety if DB is unavailable
                 g.user = None
+
         except Exception as outer_e:
+             # Catch potential errors even trying to get the connection
              logging.error(f"[BeforeRequest] Outer exception for user {user_id}: {outer_e}", exc_info=True)
+             # Clear session if we couldn't even attempt DB interaction
              session.clear()
              g.user = None
+
     else:
+         # No user_id found in the session initially
          logging.debug("[BeforeRequest] No user_id in session.")
-    # Log final state before returning control to Flask
+         g.user = None # Ensure g.user is None
+
+    # Log the final state of g.user for the request (useful for debugging)
     logging.debug(f"[BeforeRequest] End. g.user is set: {bool(g.user)}")
 
 def clear_qkd_session_log():
