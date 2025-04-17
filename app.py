@@ -489,81 +489,114 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Inside app.py
-
 @app.before_request
 def load_logged_in_user():
     """
     Load user data into Flask's 'g' object before each request if logged in.
-    Adapted for PostgreSQL connection handling.
+    Adapted for PostgreSQL connection handling. Ensures g.user is properly set or None.
     """
     user_id = session.get('user_id')
-    g.user = None # Default to None for this request
+    g.user = None # Always reset g.user at the start of a request
 
     if user_id:
-        conn = None # Initialize conn outside try
-        cursor = None # Initialize cursor outside try
+        conn = None # Initialize connection variable
+        cursor = None # Initialize cursor variable
         try:
-            conn = get_db_connection() # Get DB connection (handles PG/MySQL fallback)
+            # Attempt to get a database connection
+            conn = get_db_connection() # Handles PG/MySQL fallback
+
             if conn:
-                # Use DictCursor for PostgreSQL to get results as dictionaries
-                # Check if it's a psycopg2 connection before setting factory,
-                # although get_db_connection should ideally return a consistent type or None.
-                # Safer: Create cursor inside the if block after getting conn.
+                # Proceed only if connection is successful
                 try:
+                    # Use DictCursor for convenient dictionary-like row access with psycopg2
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                    # Fetch minimal user info needed for the request context
-                    cursor.execute("SELECT customer_id, customer_name, email FROM customers WHERE customer_id = %s", (user_id,))
-                    user_data_row = cursor.fetchone() # Returns DictRow or None
+
+                    # Fetch essential user details (non-sensitive)
+                    sql = "SELECT customer_id, customer_name, email FROM customers WHERE customer_id = %s"
+                    cursor.execute(sql, (user_id,))
+                    user_data_row = cursor.fetchone() # Fetches one row as DictRow or None
 
                     if user_data_row:
-                        # User found, store in g as a standard dict
-                        g.user = dict(user_data_row)
-                        session.permanent = True # Refresh session lifetime on activity
+                        # User found in database, populate g.user with a standard dict
+                        g.user = dict(user_data_row) # Convert DictRow to dict
+                        # Log successful load for debugging
+                        logging.debug(f"Successfully loaded g.user in before_request: {g.user}")
+                        # Refresh session lifetime on user activity
+                        session.permanent = True
                     else:
-                        # User ID in session but not found in DB - clear invalid session
-                        logging.warning(f"User {user_id} in session not found in DB. Clearing session.")
-                        session.clear()
+                        # User ID was in session, but no matching user in DB (e.g., deleted account)
+                        logging.warning(f"User ID {user_id} found in session, but no matching user in database. Clearing session.")
+                        session.clear() # Clear the invalid session data
+                        g.user = None # Ensure g.user remains None
 
-                except DBError as e: # Catch psycopg2 errors
-                    logging.error(f"DB Error loading session user {user_id}: {e}")
-                    # Don't clear session on temporary DB error, g.user remains None
-                except Exception as e: # Catch other unexpected errors
-                    logging.error(f"Unexpected error loading user {user_id}: {e}", exc_info=True)
-                    # Potentially clear session here too? Depends on policy.
+                except DBError as e: # Catch PostgreSQL specific errors during query/fetch
+                    logging.error(f"Database Error loading user data for session user_id {user_id}: {e}")
+                    # Don't clear session on temporary DB error, but g.user will remain None
+                    g.user = None
+                except Exception as e: # Catch other unexpected errors during DB interaction
+                    logging.error(f"Unexpected error loading user data for user_id {user_id}: {e}", exc_info=True)
+                    g.user = None
+                    # Depending on severity/policy, might clear session here too
+                    # session.clear()
                 finally:
-                    # --- Corrected Cleanup within load_logged_in_user's DB block ---
+                    # Cleanup cursor and connection for this specific DB interaction
                     if cursor:
                         try:
                             cursor.close()
-                        except DBError: pass # Ignore cursor close errors
+                        except DBError: pass # Ignore DB specific close error
                         except Exception as cur_e: logging.warning(f"Unexpected error closing session cursor: {cur_e}")
-                    # Close the connection obtained *within this function*
-                    if conn: # Ensure conn was successfully obtained before trying to close
+                    # Close connection obtained within this function block
+                    if conn: # Check if conn object was successfully created
                         close_db_connection(conn)
-                    # --- End Corrected Cleanup ---
             else:
-                # get_db_connection returned None (failed to connect)
-                logging.error("DB connection failed in load_logged_in_user. Clearing session.")
-                session.clear() # Clear session if DB is down, for safety
+                # get_db_connection() returned None (failed to connect)
+                logging.error("DB connection failed in load_logged_in_user. Cannot verify user session. Clearing session.")
+                session.clear() # Clear session for safety if DB is unavailable
+                g.user = None
+
         except Exception as outer_e:
-             # Catch errors even getting the connection (should be handled in get_db_connection, but defensive)
+             # Catch potential errors even trying to get the connection
              logging.error(f"Outer exception in load_logged_in_user for user {user_id}: {outer_e}", exc_info=True)
-             # Clear session if connection couldn't even be attempted
+             # Clear session if we couldn't even attempt DB interaction
              session.clear()
+             g.user = None
+
+    # If user_id was not in session initially, g.user remains None (default)
+    # Log the final state of g.user for the request (useful for debugging)
+    # logging.debug(f"load_logged_in_user finished. g.user is set: {bool(g.user)}")
 
 def clear_qkd_session_log():
+     """Removes the last QKD simulation log from the user's session."""
+     # Safely get user_id from g.user first, fallback to session
      user_id = getattr(g, 'user', {}).get('id') or session.get('user_id')
      if user_id:
          log_key = f'last_qkd_log_{user_id}'
-         if log_key in session: session.pop(log_key); session.modified = True; logging.info(f"Cleared QKD log for user {user_id}")
+         # Use pop with default None to avoid KeyError if key doesn't exist
+         if session.pop(log_key, None) is not None:
+             session.modified = True # Ensure session changes are saved
+             logging.info(f"Cleared QKD log from session for user {user_id}")
+         # else: # Optional log if needed
+         #     logging.debug(f"No QKD log found in session for user {user_id} to clear.")
+     # else: # Optional log if needed
+     #     logging.warning("Could not determine user ID to clear QKD session log.")
+
 
 # --- Async Email Helper ---
 def send_async_email(app_context, msg):
+    """Sends email in a background thread using app context."""
+    # Pass the whole app context for Flask-Mail and config access
     with app_context:
-        if not mail: logging.error("Mail not init. Cannot send."); return
-        try: mail.send(msg); logging.info(f"Async email sent OK to {msg.recipients}")
-        except Exception as e: logging.error(f"Error sending async email: {e}", exc_info=True)
+        if not mail:
+            logging.error("Flask-Mail (mail object) not initialized. Cannot send async email.")
+            return
+        try:
+            logging.debug(f"Attempting to send async email via Flask-Mail to: {msg.recipients}")
+            mail.send(msg)
+            # Log success AFTER send attempt returns without error
+            logging.info(f"Async email sent successfully via Flask-Mail to {msg.recipients}")
+        except Exception as e:
+            # Log the full error details for debugging SMTP issues
+            logging.error(f"Error sending async email via Flask-Mail to {msg.recipients}: {e}", exc_info=True)
 
 # --- Flask Routes ---
 @app.route('/')
@@ -781,24 +814,64 @@ def register_customer():
     # Renders the initial empty form or re-renders if WTForms validation failed on initial POST
     return render_template('register.html', form=form)
 
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    """Handles user login."""
     if g.user: return redirect(url_for('index'))
     form = LoginForm() if WTFORMS_AVAILABLE else None
+    logging.debug(f"Login route accessed, method: {request.method}") # Log access
+
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
+
         email = form.email.data if WTFORMS_AVAILABLE else request.form.get('email', '').strip().lower()
         password = form.password.data if WTFORMS_AVAILABLE else request.form.get('password', '')
-        if not email or not password: flash("Email/password required.", "error"); return render_template('login.html', form=form)
+        logging.info(f"Login attempt for email: {email}") # Log attempt
+
+        if not email or not password:
+            flash("Email and password are required.", "error")
+            return render_template('login.html', form=form)
+
+        # *** DEBUG: Check user lookup ***
         customer = get_user_by_email(email)
-        if customer and check_password_hash(customer.get('password_hash',''), password):
-            session.clear(); session['user_id'] = customer['customer_id']; session.permanent = True
-            g.user = {'id': customer['customer_id'], 'name': customer['customer_name'], 'email': customer['email']}
-            logging.info(f"User {customer['customer_name']} (ID: {customer['customer_id']}) logged in.")
-            flash(f"Welcome back, {customer.get('customer_name', 'User')}!", "success")
-            next_page = request.args.get('next'); return redirect(next_page) if next_page and next_page.startswith('/') and ' ' not in next_page else redirect(url_for('index'))
-        else: logging.warning(f"Failed login: {email}"); flash("Invalid email or password.", "error")
+        logging.debug(f"Result of get_user_by_email({email}): {'User found' if customer else 'User NOT found'}")
+
+        if customer:
+            # *** DEBUG: Check password hash ***
+            stored_hash = customer.get('password_hash', '')
+            logging.debug(f"Stored hash found: {'Yes' if stored_hash else 'No'}")
+            is_valid_password = check_password_hash(stored_hash, password)
+            logging.debug(f"Password check result: {is_valid_password}")
+
+            if is_valid_password:
+                # Login successful path
+                session.clear()
+                session['user_id'] = customer['customer_id']
+                session.permanent = True
+                # *** DEBUG: Confirm session set ***
+                logging.debug(f"Session user_id set to: {session.get('user_id')}")
+
+                # Manually load g.user immediately for this request context
+                # (load_logged_in_user will run again on next request)
+                g.user = {'id': customer['customer_id'], 'name': customer['customer_name'], 'email': customer['email']}
+                logging.info(f"User {g.user['name']} (ID: {g.user['id']}) login successful. Redirecting...")
+
+                flash(f"Welcome back, {g.user.get('name', 'User')}!", "success")
+                next_page = request.args.get('next')
+                # *** DEBUG: Check redirect target ***
+                redirect_target = next_page if next_page and next_page.startswith('/') and ' ' not in next_page else url_for('index')
+                logging.debug(f"Redirecting to: {redirect_target}")
+                return redirect(redirect_target)
+            else:
+                # Invalid password path
+                logging.warning(f"Failed login attempt for {email}: Invalid password.")
+                flash("Invalid email or password.", "error")
+        else:
+            # User not found path
+            logging.warning(f"Failed login attempt for {email}: User not found.")
+            flash("Invalid email or password.", "error") # Keep message generic
+
+    # Handle GET request or failed POST validation
     return render_template('login.html', form=form)
 
 @app.route('/logout')
