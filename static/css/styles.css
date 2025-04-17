@@ -1,0 +1,58 @@
+/* static/css/styles.css */
+
+@layer base {
+    /* Example: Define smooth scrolling globally if desired */
+    /* html {
+        scroll-behavior: smooth;
+    } */
+
+    /* Example: Custom font loading or base font adjustments if not covered by Tailwind */
+    /* body {
+        font-family: 'Your Custom Font', sans-serif;
+    } */
+}
+
+@layer components {
+    /* Example: Define a reusable custom component style */
+    /* .btn-custom-gradient {
+        @apply py-2 px-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-semibold rounded-lg shadow-md hover:from-cyan-600 hover:to-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition duration-150 ease-in-out;
+    } */
+}
+
+@layer utilities {
+    /* Example: Define a custom utility class */
+    /* .text-shadow-sm {
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+    } */
+}
+
+/* Add any non-Tailwind-related CSS below */
+
+/* --- KEYFRAMES REMOVED --- */
+/* @keyframes quantumFlow { ... } */
+
+/* Styling for the Chart.js canvas container (if used) */
+#qberChartContainer { /* Optional: Add an ID to the div containing the canvas */
+    @apply p-4 bg-white rounded-lg shadow border border-gray-200;
+    /* Note: '@apply' works here if your build process handles it (like using Tailwind CLI or PostCSS).
+       If not, replace with standard CSS:
+       padding: 1rem; background-color: white; border-radius: 0.5rem;
+       box-shadow: var(--tw-shadow, 0 0 #0000), var(--tw-shadow-colored, 0 0 #0000); / * Simplified shadow representation * /
+       border: 1px solid #e5e7eb;
+    */
+}
+
+/* --- #particles-js RULE REMOVED --- */
+/*
+#particles-js {
+  ...
+}
+*/
+
+/* --- Stacking Context RULE (already commented out) --- */
+/*
+body > nav, body > main, body > footer {
+    position: relative;
+    z-index: 1;
+}
+*/
