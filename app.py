@@ -574,7 +574,16 @@ def home_redirect():
 @app.route('/index')
 @login_required
 def index():
-    user_id = g.user['id']
+    """Main dashboard page."""
+    # --- MODIFIED USER ID FETCH ---
+    # Safely get user ID from g.user, default to None if key missing (though decorator should prevent None g.user)
+    user_id = g.user.get('id')
+    if user_id is None:
+         # This should ideally not happen if @login_required worked, but handle defensively
+         logging.error("CRITICAL: User ID missing from g.user in /index despite login_required.")
+         flash("An error occurred retrieving your user information. Please log in again.", "error")
+         session.clear() # Clear potentially corrupted session
+         return redirect(url_for('login'))
     user_accounts = get_accounts_data(customer_id_filter=user_id)
     all_accounts = get_accounts_data()
     if user_accounts is None: user_accounts = []; flash("Error loading account info.", "error")
