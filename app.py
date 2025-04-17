@@ -484,86 +484,78 @@ def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session: flash("Please log in.", "warning"); return redirect(url_for('login', next=request.url))
-        if not g.get('user'): session.clear(); flash("Session invalid. Please log in.", "warning"); logging.warning("Cleared session: user_id OK but g.user missing."); return redirect(url_for('login'))
+        # Check session first
+        if 'user_id' not in session:
+            flash("Please log in.", "warning")
+            return redirect(url_for('login', next=request.url))
+        # Check g.user *and* if it has 'id' key BEFORE proceeding
+        if not g.get('user') or 'id' not in g.user: # More explicit check
+             session.clear()
+             flash("Session invalid or incomplete. Please log in again.", "warning")
+             logging.warning(f"Cleared session in decorator: g.user check failed (g.user: {g.get('user')})")
+             return redirect(url_for('login'))
+        # If checks pass
+        logging.debug(f"Login required check passed for user: {g.user.get('id')}")
         return f(*args, **kwargs)
     return decorated_function
 
 @app.before_request
 def load_logged_in_user():
-    """
-    Load user data into Flask's 'g' object before each request if logged in.
-    Adapted for PostgreSQL connection handling. Ensures g.user is properly set or None.
-    """
     user_id = session.get('user_id')
-    g.user = None # Always reset g.user at the start of a request
+    g.user = None # Default
+    logging.debug(f"[BeforeRequest] Start. Session user_id: {user_id}") # Log start
 
     if user_id:
-        conn = None # Initialize connection variable
-        cursor = None # Initialize cursor variable
+        conn = None; cursor = None
         try:
-            # Attempt to get a database connection
-            conn = get_db_connection() # Handles PG/MySQL fallback
-
+            conn = get_db_connection()
             if conn:
-                # Proceed only if connection is successful
                 try:
-                    # Use DictCursor for convenient dictionary-like row access with psycopg2
-                    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-                    # Fetch essential user details (non-sensitive)
+                    # Use standard cursor here as we access by index below
+                    cursor = conn.cursor()
+                    logging.debug(f"[BeforeRequest] DB Connected. Querying for user_id: {user_id}")
                     sql = "SELECT customer_id, customer_name, email FROM customers WHERE customer_id = %s"
                     cursor.execute(sql, (user_id,))
-                    user_data_row = cursor.fetchone() # Fetches one row as DictRow or None
+                    user_data_tuple = cursor.fetchone() # Returns tuple or None
 
-                    if user_data_row:
-                        # User found in database, populate g.user with a standard dict
-                        g.user = dict(user_data_row) # Convert DictRow to dict
-                        # Log successful load for debugging
-                        logging.debug(f"Successfully loaded g.user in before_request: {g.user}")
-                        # Refresh session lifetime on user activity
-                        session.permanent = True
+                    # *** DETAILED LOGGING HERE ***
+                    logging.debug(f"[BeforeRequest] DB Fetch Result for {user_id}: {user_data_tuple}")
+
+                    if user_data_tuple:
+                        # Assign to g.user
+                        g.user = {'id': user_data_tuple[0], 'name': user_data_tuple[1], 'email': user_data_tuple[2]}
+                        session.permanent = True # Refresh session
+                        # *** LOG SUCCESSFUL ASSIGNMENT ***
+                        logging.info(f"[BeforeRequest] Successfully set g.user for user_id {user_id}: {g.user}")
                     else:
-                        # User ID was in session, but no matching user in DB (e.g., deleted account)
-                        logging.warning(f"User ID {user_id} found in session, but no matching user in database. Clearing session.")
-                        session.clear() # Clear the invalid session data
-                        g.user = None # Ensure g.user remains None
+                        # User ID in session but not found in DB
+                        logging.warning(f"[BeforeRequest] User {user_id} in session NOT FOUND in DB. Clearing session.")
+                        session.clear()
+                        g.user = None # Explicitly ensure g.user is None
 
-                except DBError as e: # Catch PostgreSQL specific errors during query/fetch
-                    logging.error(f"Database Error loading user data for session user_id {user_id}: {e}")
-                    # Don't clear session on temporary DB error, but g.user will remain None
+                except DBError as e:
+                    logging.error(f"[BeforeRequest] DBError loading session user {user_id}: {e}")
+                    g.user = None # Ensure g.user is None on DB error
+                except Exception as e:
+                    logging.error(f"[BeforeRequest] Unexpected error loading user {user_id}: {e}", exc_info=True)
                     g.user = None
-                except Exception as e: # Catch other unexpected errors during DB interaction
-                    logging.error(f"Unexpected error loading user data for user_id {user_id}: {e}", exc_info=True)
-                    g.user = None
-                    # Depending on severity/policy, might clear session here too
-                    # session.clear()
                 finally:
-                    # Cleanup cursor and connection for this specific DB interaction
-                    if cursor:
-                        try:
-                            cursor.close()
-                        except DBError: pass # Ignore DB specific close error
-                        except Exception as cur_e: logging.warning(f"Unexpected error closing session cursor: {cur_e}")
-                    # Close connection obtained within this function block
-                    if conn: # Check if conn object was successfully created
-                        close_db_connection(conn)
+                    if cursor: try: cursor.close() except DBError: pass
+                    # Close connection obtained ONLY in this function
+                    if conn: close_db_connection(conn)
             else:
-                # get_db_connection() returned None (failed to connect)
-                logging.error("DB connection failed in load_logged_in_user. Cannot verify user session. Clearing session.")
-                session.clear() # Clear session for safety if DB is unavailable
+                # get_db_connection failed
+                logging.error("[BeforeRequest] DB connection failed. Clearing session.")
+                session.clear()
                 g.user = None
-
         except Exception as outer_e:
-             # Catch potential errors even trying to get the connection
-             logging.error(f"Outer exception in load_logged_in_user for user {user_id}: {outer_e}", exc_info=True)
-             # Clear session if we couldn't even attempt DB interaction
+             logging.error(f"[BeforeRequest] Outer exception for user {user_id}: {outer_e}", exc_info=True)
              session.clear()
              g.user = None
-
-    # If user_id was not in session initially, g.user remains None (default)
-    # Log the final state of g.user for the request (useful for debugging)
-    # logging.debug(f"load_logged_in_user finished. g.user is set: {bool(g.user)}")
+    else:
+         logging.debug("[BeforeRequest] No user_id in session.")
+    # Log final state before returning control to Flask
+    logging.debug(f"[BeforeRequest] End. g.user is set: {bool(g.user)}")
 
 def clear_qkd_session_log():
      """Removes the last QKD simulation log from the user's session."""
