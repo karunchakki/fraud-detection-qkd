@@ -695,29 +695,67 @@ def register_customer():
         # --- 3. Database Operations ---
         conn = None; cursor = None; user_exists = False; error_occurred = False; db_type = "Unknown"
 
-        # 3a. Pre-check email
-        try:
-             conn = get_db_connection();
-             if not conn: raise ConnectionError("DB pre-check connection error.")
-             db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type
-             cursor = conn.cursor() # Simple cursor for existence check
-             cursor.execute("SELECT 1 FROM customers WHERE email = %s LIMIT 1", (email,))
-             if cursor.fetchone(): user_exists = True; flash("Email already registered.", "error")
-        except (DB_ERROR_TYPE, ConnectionError) as e:
-            logging.error(f"DB pre-check error ({db_type}): {e}"); flash("DB pre-check error.", "error"); error_occurred = True
-        except Exception as e:
-            logging.error(f"Unexpected pre-check error: {e}", exc_info=True); flash("Unexpected pre-check error.", "error"); error_occurred = True
-        finally:
-             if cursor:
-                    try:
-                        cursor.close()
-                    except DB_ERROR_TYPE: # Catch specific DB error on close
-                        pass # Ignore DB-specific errors closing cursor
-                    except Exception as cur_close_e: # Catch other errors
-                        logging.warning(f"Non-DB error closing registration cursor: {cur_close_e}")
-                 close_db_connection(conn)
+ # 3a. Pre-check if email exists
+        conn = None # Ensure conn is defined before try
+        cursor = None # Ensure cursor is defined before try
+        user_exists = False
+        error_occurred = False
+        db_type = "Unknown"
 
-        if user_exists or error_occurred: return render_template('register.html', form=form)
+        try:
+             conn = get_db_connection()
+             if not conn:
+                  # Set error flag and message if connection fails
+                  error_occurred = True
+                  flash("Database connection error during pre-check.", "error")
+                  # No 'return' here, let the check after finally handle it
+             else:
+                 # Proceed with check only if connection succeeded
+                 db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type
+                 cursor = conn.cursor() # Simple cursor is fine for existence check
+                 logging.debug(f"Register Pre-check: Using {db_type} cursor.")
+
+                 cursor.execute("SELECT 1 FROM customers WHERE email = %s LIMIT 1", (email,))
+                 if cursor.fetchone():
+                     user_exists = True
+                     # Add error based on WTForms availability
+                     if WTFORMS_AVAILABLE and hasattr(form.email, 'errors'):
+                         form.email.errors.append("Email address is already registered.")
+                     else:
+                         flash("Email address is already registered.", "error")
+
+        except (DB_ERROR_TYPE, ConnectionError) as e:
+            logging.error(f"DB pre-check error ({db_type}) for {email}: {e}")
+            flash("A database error occurred during pre-check.", "error")
+            error_occurred = True
+        except Exception as e:
+             logging.error(f"Unexpected pre-check error for {email}: {e}", exc_info=True)
+             flash("An unexpected error occurred during pre-check.", "error")
+             error_occurred = True
+        finally:
+             # --- CORRECTED FINALLY for Pre-check ---
+             # Always close the cursor used for the pre-check if it exists
+             if cursor:
+                 try:
+                     cursor.close()
+                 except DB_ERROR_TYPE: pass # Ignore DB specific close errors
+                 except Exception as cur_close_err: logging.warning(f"Error closing pre-check cursor: {cur_close_err}")
+
+             # Close the connection ONLY if we are stopping (user exists or error occurred)
+             # Otherwise, keep it open for the main transaction block (3b)
+             if (user_exists or error_occurred) and conn and not getattr(conn, 'closed', True):
+                 logging.debug("Closing connection after failed pre-check or existing user found.")
+                 close_db_connection(conn)
+             elif conn:
+                 logging.debug("Pre-check passed. Keeping connection open for main transaction.")
+             # --- END CORRECTION ---
+
+        # --- Decision Point ---
+        # If email exists OR an error occurred during pre-check, stop and re-render
+        if user_exists or error_occurred:
+            # Ensure connection is definitely closed if we stop here
+            if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
+            return render_template('register.html', form=form)
 
         # --- 3b. Main Transaction: Insert Customer & Account ---
         cursor = None; needs_rollback = False; new_customer_id = None
