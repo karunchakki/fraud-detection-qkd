@@ -1051,29 +1051,27 @@ def reset_password(token):
             # Check connection object exists and is not closed before cleanup
             if conn and not getattr(conn, 'closed', True):
                 if needs_rollback:
-                    # *** CORRECTED ROLLBACK BLOCK ***
                     try:
                         conn.rollback()
                         logging.warning(f"Password reset transaction rolled back for {email}.")
-                    except DBError as rb_err: # Use DBError
+                    except DB_ERROR_TYPE as rb_err: # Use global DB_ERROR_TYPE
                         logging.error(f"Rollback attempt failed during password reset: {rb_err}")
                     except Exception as rb_gen_err:
                         logging.error(f"Unexpected error during reset rollback: {rb_gen_err}")
-                    # *** END CORRECTION ***
 
-                # Close cursor if it exists
+                # --- CORRECTED CURSOR CLOSE for Reset Password ---
                 if cursor:
-                    # *** CORRECTED CURSOR CLOSE BLOCK ***
                     try:
                         cursor.close()
-                    except DBError: # Use DBError, ignore errors closing cursor
-                        pass
+                    except DB_ERROR_TYPE: # Use global DB_ERROR_TYPE
+                        pass # Ignore DB-specific errors closing cursor
                     except Exception as cur_close_err:
-                        logging.error(f"Unexpected error closing reset cursor: {cur_close_err}")
-                    # *** END CORRECTION ***
+                        logging.warning(f"Non-DB error closing reset password cursor: {cur_close_err}")
+                # --- END CORRECTION ---
 
                 # Close the connection used for this operation
                 close_db_connection(conn)
+        # --- END of finally block ---
 
         # Redirect or re-render based on update success
         if updated:
