@@ -1744,6 +1744,56 @@ def get_flagged_transactions(user_id, limit=50):
     # Return the list of formatted transactions (might be empty)
     return txns
 
+@app.route('/profile')
+@login_required
+def profile():
+    """Displays the user profile page with details and logout."""
+    user_id = g.user['id']
+    account = None # Initialize account to None
+
+    # Fetch associated account details for the logged-in user
+    conn = get_db_connection()
+    cursor = None
+    if conn:
+        try:
+            cursor = conn.cursor(dictionary=True)
+            # Fetch the primary account associated with the customer ID
+            cursor.execute("""
+                SELECT account_id, account_number, balance
+                FROM accounts
+                WHERE customer_id = %s
+                ORDER BY account_id ASC
+                LIMIT 1
+            """, (user_id,))
+            account_raw = cursor.fetchone()
+            if account_raw:
+                 # Ensure balance is Decimal
+                 try:
+                     account_raw['balance'] = Decimal(account_raw['balance'])
+                 except (InvalidOperation, TypeError):
+                      logging.warning(f"Could not convert balance '{account_raw['balance']}' to Decimal for user {user_id}")
+                      account_raw['balance'] = Decimal('0.00') # Default on error
+                 account = account_raw # Assign the processed dict
+            else:
+                 logging.warning(f"No account found for user {user_id} in profile page.")
+
+        except MySQLError as e:
+            logging.error(f"DB error fetching account details for profile page (User {user_id}): {e}")
+            flash("Could not load account details due to a database error.", "warning")
+        except Exception as e:
+             logging.error(f"Unexpected error fetching account details for profile (User {user_id}): {e}", exc_info=True)
+             flash("An unexpected error occurred while loading profile details.", "warning")
+        finally:
+            if cursor:
+                try: cursor.close()
+                except MySQLError: pass
+            close_db_connection(conn)
+    else:
+        flash("Database connection unavailable. Cannot load full profile.", "error")
+
+    # Pass user (from g) and account details (fetched or None) to the template
+    return render_template('profile.html', user=g.user, account=account)
+
 @app.route('/fraud')
 @login_required
 def fraud_page():
