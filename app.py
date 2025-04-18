@@ -13,6 +13,7 @@ import base64
 import hashlib
 import traceback
 import logging
+import random
 from threading import Thread
 from decimal import Decimal, InvalidOperation
 
@@ -27,30 +28,37 @@ if os.path.exists(dotenv_path):
 else:
     print(f"--- .env file not found at {dotenv_path}, using system environment variables ---")
 
-
 # --- Database Import (Using PostgreSQL) ---
-
 POSTGRES_AVAILABLE = False
 MYSQL_AVAILABLE = False
 MySQLError = None # Define placeholder
 
+# --- Attempt PostgreSQL Import ---
 try:
     import psycopg2
     import psycopg2.extras # Needed for RealDictCursor
     POSTGRES_AVAILABLE = True
-    print("--- Psycopg2 (PostgreSQL driver) found. ---")
+    logging.info("--- Psycopg2 (PostgreSQL driver) found. ---")
 except ImportError:
-    psycopg2 = None # Define as None if not installed
-    print("--- Psycopg2 (PostgreSQL driver) not found. ---")
+    psycopg2 = None # Define as None if import fails
+    logging.warning("--- Psycopg2 (PostgreSQL driver) not found. ---")
+except Exception as e:
+    psycopg2 = None
+    logging.error(f"--- Unexpected error importing psycopg2: {e} ---")
 
+# --- Attempt MySQL Import ---
 try:
-    from mysql.connector import Error as MySQLError_import # Use temp name
-    MySQLError = MySQLError_import # Assign if successful
+    import mysql.connector # Import the main connector library
+    from mysql.connector import Error as MySQLError_import # Import Error specifically
+    MySQLError = MySQLError_import # Assign to the global placeholder if import succeeds
     MYSQL_AVAILABLE = True
-    print("--- MySQL Connector found. ---")
+    logging.info("--- MySQL Connector found. ---")
 except ImportError:
-    # MySQLError remains None
-    print("--- MySQL Connector not found. ---")
+    # MySQLError remains None, MYSQL_AVAILABLE remains False
+    logging.warning("--- MySQL Connector ('mysql-connector-python') not found. It's required for local MySQL execution. ---")
+except Exception as e:
+    # MySQLError remains None, MYSQL_AVAILABLE remains False
+    logging.error(f"--- Unexpected error importing MySQL Connector: {e} ---")
 
 # Define the Database Error Type based on environment
 # (Assuming DATABASE_URL means PostgreSQL, otherwise MySQL)
