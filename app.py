@@ -436,42 +436,50 @@ def get_accounts_data(customer_id_filter=None):
 def get_user_by_email(email):
     """Fetches user details by email. Adapted for PG/MySQL. Returns dict or None."""
     user = None; conn = None; cursor = None; db_type = "Unknown"
-    if not isinstance(email, str) or not email: return None # Basic input validation
+    if not isinstance(email, str) or not email: return None
 
     try:
         conn = get_db_connection()
         if not conn: raise ConnectionError("DB connection failed in get_user_by_email.")
+        db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type
 
-        # Determine cursor type
-        if hasattr(conn, 'driver_name') and conn.driver_name == 'psycopg2':
+        # Use dictionary-like cursor for easier access
+        if db_type == 'psycopg2':
             cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            db_type = "PostgreSQL"
-        elif hasattr(conn, 'driver_name') and conn.driver_name == 'mysql':
+        elif db_type == 'mysql':
             cursor = conn.cursor(dictionary=True)
-            db_type = "MySQL"
         else: # Fallback
-            cursor = conn.cursor()
-            db_type = "Fallback"
+            cursor = conn.cursor() # May return tuples
         logging.debug(f"get_user_by_email: Using {db_type} cursor.")
 
-        # SQL query remains the same, placeholders work for both
         cursor.execute("SELECT customer_id, customer_name, email, password_hash FROM customers WHERE email = %s", (email,))
-        user_row = cursor.fetchone() # Fetches RealDictRow or dict
-        if user_row:
-            user = dict(user_row) # Convert to standard dict
+        user_row = cursor.fetchone() # Fetches RealDictRow, dict, or tuple
 
-    except DB_ERROR_TYPE as e: # Use global DB_ERROR_TYPE
-        logging.error(f"DB Error fetch user {email} ({db_type}): {e}"); user = None
-    except ConnectionError as e:
-        logging.error(f"Conn error fetch user {email}: {e}"); user = None
-    except Exception as e:
-        logging.error(f"Unexpected error fetch user {email}: {e}", exc_info=True); user = None
+        # --- SAFER CONVERSION ---
+        if user_row:
+            # Check if it's already a dictionary-like object (mapping)
+            if hasattr(user_row, 'keys'): # Covers dict and RealDictRow
+                 user = dict(user_row)
+            elif isinstance(user_row, (tuple, list)) and len(user_row) >= 4: # Handle tuple case
+                 # Manually create dict if it's a tuple/list
+                 user = {
+                     'customer_id': user_row[0],
+                     'customer_name': user_row[1],
+                     'email': user_row[2],
+                     'password_hash': user_row[3]
+                 }
+            else:
+                 logging.error(f"Fetched user_row for {email} is in unexpected format: {type(user_row)}")
+                 user = None # Couldn't convert
+        # --- END SAFER CONVERSION ---
+
+    except DB_ERROR_TYPE as e: logging.error(f"DB Error fetch user {email} ({db_type}): {e}"); user = None
+    except ConnectionError as e: logging.error(f"Conn error fetch user {email}: {e}"); user = None
+    except Exception as e: logging.error(f"Unexpected error fetch user {email}: {e}", exc_info=True); user = None
     finally:
-        # Safe cleanup
         if cursor:
             try: cursor.close()
-            except DB_ERROR_TYPE: pass
-            except Exception: pass
+            except: pass # Ignore close errors
         if conn: close_db_connection(conn)
     return user
   
@@ -691,11 +699,9 @@ def index():
                            transfer_form=transfer_form, show_fraud_alert=show_fraud_alert,
                            flagged_transactions=flagged_transactions, last_transfer_outcome=last_transfer_outcome)
 
-# Inside app.py
-
 @app.route('/register', methods=['GET', 'POST'])
 def register_customer():
-    """Handles new customer registration. Adapted for PG/MySQL."""
+    """Handles new customer registration. Adapted for PG/MySQL with robust ID retrieval."""
     if g.user: return redirect(url_for('index'))
     form = RegistrationForm() if WTFORMS_AVAILABLE else None
 
@@ -720,76 +726,54 @@ def register_customer():
         # --- 3. Database Operations ---
         conn = None; cursor = None; user_exists = False; error_occurred = False; db_type = "Unknown"
 
- # 3a. Pre-check if email exists
-        conn = None # Ensure conn is defined before try
-        cursor = None # Ensure cursor is defined before try
-        user_exists = False
-        error_occurred = False
-        db_type = "Unknown"
-
+        # 3a. Pre-check email
         try:
-             conn = get_db_connection()
-             if not conn:
-                  # Set error flag and message if connection fails
-                  error_occurred = True
-                  flash("Database connection error during pre-check.", "error")
-                  # No 'return' here, let the check after finally handle it
-             else:
-                 # Proceed with check only if connection succeeded
-                 db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type
-                 cursor = conn.cursor() # Simple cursor is fine for existence check
-                 logging.debug(f"Register Pre-check: Using {db_type} cursor.")
-
-                 cursor.execute("SELECT 1 FROM customers WHERE email = %s LIMIT 1", (email,))
-                 if cursor.fetchone():
-                     user_exists = True
-                     # Add error based on WTForms availability
-                     if WTFORMS_AVAILABLE and hasattr(form.email, 'errors'):
-                         form.email.errors.append("Email address is already registered.")
-                     else:
-                         flash("Email address is already registered.", "error")
-
+             conn = get_db_connection();
+             if not conn: raise ConnectionError("DB pre-check connection error.")
+             db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type early
+             cursor = conn.cursor() # Simple cursor for existence check
+             logging.debug(f"Register Pre-check: Using {db_type} cursor.")
+             cursor.execute("SELECT 1 FROM customers WHERE email = %s LIMIT 1", (email,))
+             if cursor.fetchone():
+                 user_exists = True
+                 if WTFORMS_AVAILABLE and hasattr(form.email, 'errors'): form.email.errors.append("Email already registered.")
+                 else: flash("Email already registered.", "error")
         except (DB_ERROR_TYPE, ConnectionError) as e:
             logging.error(f"DB pre-check error ({db_type}) for {email}: {e}")
             flash("A database error occurred during pre-check.", "error")
             error_occurred = True
         except Exception as e:
-             logging.error(f"Unexpected pre-check error for {email}: {e}", exc_info=True)
-             flash("An unexpected error occurred during pre-check.", "error")
-             error_occurred = True
+            logging.error(f"Unexpected pre-check error for {email}: {e}", exc_info=True)
+            flash("An unexpected error occurred during pre-check.", "error")
+            error_occurred = True
         finally:
-             # --- CORRECTED FINALLY for Pre-check ---
              # Always close the cursor used for the pre-check if it exists
              if cursor:
-                 try:
-                     cursor.close()
+                 try: cursor.close()
                  except DB_ERROR_TYPE: pass # Ignore DB specific close errors
                  except Exception as cur_close_err: logging.warning(f"Error closing pre-check cursor: {cur_close_err}")
-
-             # Close the connection ONLY if we are stopping (user exists or error occurred)
-             # Otherwise, keep it open for the main transaction block (3b)
+             # Close the connection ONLY if we are stopping
              if (user_exists or error_occurred) and conn and not getattr(conn, 'closed', True):
-                 logging.debug("Closing connection after failed pre-check or existing user found.")
+                 logging.debug("Closing connection after failed pre-check or existing user.")
                  close_db_connection(conn)
              elif conn:
-                 logging.debug("Pre-check passed. Keeping connection open for main transaction.")
-             # --- END CORRECTION ---
+                 logging.debug("Pre-check passed. Keeping connection open.")
 
         # --- Decision Point ---
-        # If email exists OR an error occurred during pre-check, stop and re-render
         if user_exists or error_occurred:
-            # Ensure connection is definitely closed if we stop here
+            # Ensure connection closed if stopping here
             if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
             return render_template('register.html', form=form)
 
         # --- 3b. Main Transaction: Insert Customer & Account ---
+        # Conn should be open if pre-check passed
         cursor = None; needs_rollback = False; new_customer_id = None
         try:
             # Ensure connection is still valid (or reconnect)
             if not conn or getattr(conn, 'closed', True):
                 logging.warning("DB connection invalid before insert. Reconnecting."); conn = get_db_connection()
                 if not conn: raise ConnectionError("DB connection lost before registration transaction.")
-            db_type = getattr(conn, 'driver_name', 'Unknown') # Re-check db_type
+            db_type = getattr(conn, 'driver_name', 'Unknown') # Re-check db_type after potential reconnect
 
             cursor = conn.cursor() # Use standard cursor for DML with RETURNING
             needs_rollback = True
@@ -798,19 +782,39 @@ def register_customer():
 
             # --- Insert Customer ---
             sql_insert_customer = "INSERT INTO customers (customer_name, email, password_hash, phone_number) VALUES (%s, %s, %s, %s)"
-            # Use RETURNING for PostgreSQL to reliably get the new ID
-            returning_clause = " RETURNING customer_id" if db_type == 'psycopg2' else ""
+            returning_cust_clause = " RETURNING customer_id" if db_type == 'psycopg2' else ""
             customer_params = (customer_name, email, hashed_pw, phone_number_to_db)
-            cursor.execute(sql_insert_customer + returning_clause, customer_params)
+            logging.debug(f"Executing customer insert ({db_type}): {sql_insert_customer + returning_cust_clause}")
+            cursor.execute(sql_insert_customer + returning_cust_clause, customer_params)
 
-            if db_type == 'psycopg2': # Get ID from RETURNING (PG)
+            # --- Get new_customer_id (Robustly) ---
+            if db_type == 'psycopg2':
                 returned_row = cursor.fetchone()
-                if returned_row and len(returned_row) > 0: new_customer_id = returned_row[0]
-                else: raise DB_ERROR_TYPE("Failed to retrieve customer ID after insert (PG).")
-            else: # Get ID using lastrowid (MySQL)
+                logging.debug(f"PG customer insert RETURNING result: {returned_row}")
+                if returned_row and len(returned_row) > 0:
+                    new_customer_id = returned_row[0]
+                else:
+                    raise DB_ERROR_TYPE("Failed to retrieve customer ID after insert (PG).")
+            else: # MySQL or Fallback
                 new_customer_id = cursor.lastrowid
-                if not new_customer_id: raise DB_ERROR_TYPE("Failed to get customer ID after insert (MySQL).")
-            logging.debug(f"Inserted customer '{customer_name}' (ID: {new_customer_id})")
+                logging.debug(f"MySQL customer insert lastrowid: {new_customer_id}")
+                if not new_customer_id:
+                     # Fallback query if lastrowid is None/0 for MySQL
+                     logging.warning(f"lastrowid failed for {db_type}, attempting fallback query for customer ID.")
+                     # Ensure cursor is usable after potential failed lastrowid check
+                     if cursor.is_connected if hasattr(cursor, 'is_connected') else True: # Basic check
+                         cursor.execute("SELECT customer_id FROM customers WHERE email = %s", (email,))
+                         fallback_row = cursor.fetchone() # Should return a tuple
+                         logging.debug(f"MySQL customer ID fallback query result: {fallback_row}")
+                         if fallback_row and len(fallback_row) > 0:
+                             new_customer_id = fallback_row[0]
+                         else:
+                              raise DB_ERROR_TYPE("Failed to get customer ID after insert (MySQL fallback failed).")
+                     else:
+                          raise ConnectionError("Cursor disconnected during fallback customer ID fetch.")
+            # --- End Customer ID Retrieval ---
+            logging.info(f"Retrieved customer ID: {new_customer_id}")
+
 
             # --- Generate and Insert Account ---
             account_number_generated = None; attempt = 0; max_generation_attempts = 10
@@ -819,34 +823,50 @@ def register_customer():
                 potential_acc_num = str(random.randint(min_acc, max_acc))
                 logging.debug(f"Attempt {attempt}: Potential Acc No: {potential_acc_num}")
                 try:
-                    # Reuse cursor for check within transaction
                     cursor.execute("SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1", (potential_acc_num,))
-                    if not cursor.fetchone(): # If no row found, it's unique
+                    if not cursor.fetchone():
                          account_number_generated = potential_acc_num
                          logging.info(f"Unique Acc No found: {account_number_generated}")
-                         break # Exit loop
+                         break
                     else:
                          logging.warning(f"Acc No {potential_acc_num} exists. Retrying...")
-                except DB_ERROR_TYPE as check_err: # Catch DB error during check
-                    raise ValueError(f"DB error check acc uniqueness: {check_err}") # Re-raise
+                except DB_ERROR_TYPE as check_err:
+                    raise ValueError(f"DB error check acc uniqueness: {check_err}") # Re-raise critical error
 
-            if account_number_generated is None: # Check if loop finished without success
+            if account_number_generated is None:
                 raise ValueError(f"Could not generate unique account number after {max_generation_attempts} tries.")
 
             # Insert account with generated number
             sql_insert_account = "INSERT INTO accounts (customer_id, balance, account_number) VALUES (%s, %s, %s)"
             returning_acc_clause = " RETURNING account_id" if db_type == 'psycopg2' else ""
             account_params = (new_customer_id, str(app.config['INITIAL_BALANCE']), account_number_generated)
+            logging.debug(f"Executing account insert ({db_type}): {sql_insert_account + returning_acc_clause}")
             cursor.execute(sql_insert_account + returning_acc_clause, account_params)
 
-            # Verify account insertion (get ID)
+            # --- Verify account insertion (get ID - Robustly) ---
+            inserted_account_id = None # Initialize
             if db_type == 'psycopg2':
                  acc_row = cursor.fetchone()
+                 logging.debug(f"PG account insert RETURNING result: {acc_row}")
                  if not acc_row or len(acc_row) == 0: raise DB_ERROR_TYPE(f"Failed retrieve account ID cust {new_customer_id} (PG).")
                  inserted_account_id = acc_row[0]
-            else: # MySQL check
+            else: # MySQL or Fallback check
                  inserted_account_id = cursor.lastrowid
-                 if not inserted_account_id: raise DB_ERROR_TYPE(f"Failed get account ID cust {new_customer_id} (MySQL).")
+                 logging.debug(f"MySQL account insert lastrowid: {inserted_account_id}")
+                 if not inserted_account_id:
+                      logging.warning(f"lastrowid failed for {db_type}, attempting fallback query for account ID.")
+                      if cursor.is_connected if hasattr(cursor, 'is_connected') else True:
+                           cursor.execute("SELECT account_id FROM accounts WHERE customer_id = %s and account_number = %s", (new_customer_id, account_number_generated))
+                           fallback_acc_row = cursor.fetchone()
+                           logging.debug(f"MySQL account ID fallback query result: {fallback_acc_row}")
+                           if fallback_acc_row and len(fallback_acc_row) > 0:
+                               inserted_account_id = fallback_acc_row[0]
+                           else:
+                                raise DB_ERROR_TYPE(f"Failed get account ID cust {new_customer_id} (MySQL fallback failed).")
+                      else:
+                           raise ConnectionError("Cursor disconnected during fallback account ID fetch.")
+            # --- End Account ID Retrieval ---
+            logging.info(f"Retrieved account ID: {inserted_account_id}")
             logging.debug(f"Inserted account {inserted_account_id} cust {new_customer_id} AccNo: {account_number_generated}")
 
             # --- Commit ---
@@ -871,15 +891,18 @@ def register_customer():
         finally: # Rollback and cleanup if necessary
             if conn and not getattr(conn, 'closed', True):
                 if needs_rollback:
-                    try: conn.rollback(); logging.warning(f"Registration rolled back for '{email}'.")
-                    except Exception as rb_err: logging.error(f"Rollback failed: {rb_err}")
+                    try:
+                        conn.rollback()
+                        logging.warning(f"Registration rolled back for '{email}'.")
+                    except Exception as rb_err: # Catch any rollback error
+                         logging.error(f"Rollback failed: {rb_err}")
+                # Safe cursor close
                 if cursor:
                     try:
                         cursor.close()
-                    except DB_ERROR_TYPE: # Use global type
-                        pass # Ignore DB-specific errors closing cursor
-                    except Exception as cur_close_err:
-                        logging.warning(f"Non-DB error closing registration cursor: {cur_close_err}")
+                    except DB_ERROR_TYPE: pass # Ignore DB-specific errors closing cursor
+                    except Exception as cur_close_err: logging.warning(f"Non-DB error closing registration cursor: {cur_close_err}")
+                # Always close connection if opened in this block
                 close_db_connection(conn)
 
         # Re-render form if transaction failed
