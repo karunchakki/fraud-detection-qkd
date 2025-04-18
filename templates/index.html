@@ -53,7 +53,13 @@
                     <tr>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{{ acc.account_id }}</td>
                         {# === ADD Account Number Data Cell === #}
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700 dark:text-gray-300">{{ acc.account_number | default('N/A') }}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700 dark:text-gray-300">
+                            {% if acc.account_number %} {# Checks if account_number has a non-empty, non-None value #}
+                                {{ acc.account_number }}
+                            {% else %} {# If account_number is None, empty, or False #}
+                                N/A
+                            {% endif %}
+                        </td>
                         {# === END Data Cell === #}
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800 dark:text-gray-200">{{ acc.customer_name | e }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-700 dark:text-gray-300">₹{{ "%.2f"|format(acc.balance) }}</td>
