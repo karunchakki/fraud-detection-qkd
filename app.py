@@ -521,18 +521,6 @@ def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value
         if log_conn: close_db_connection(log_conn)
     # --- End Correction ---
 
-    finally:
-        # Ensure cursor and connection are closed
-        if log_cursor:
-            try:
-                log_cursor.close()
-            except DBError: # Use DBError
-                pass # Ignore errors closing cursor on error
-            except Exception as cur_close_err:
-                 logging.error(f"Unexpected error closing log cursor: {cur_close_err}")
-        # Use the helper function which handles checks
-        close_db_connection(log_conn)
-
 # --- Authentication & Session Management ---
 def login_required(f):
     @wraps(f)
