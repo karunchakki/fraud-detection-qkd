@@ -347,20 +347,21 @@ def get_accounts_data(customer_id_filter=None):
         conn = get_db_connection()
         if not conn: raise ConnectionError("DB connection failed in get_accounts_data.")
 
-        # Determine cursor type
-        # Use RealDictCursor for PG to get dict-like rows easily
+        # Determine cursor type (RealDictCursor for PG, dictionary=True for MySQL)
         if hasattr(conn, 'driver_name') and conn.driver_name == 'psycopg2':
+            # Use RealDictCursor for PG to get dict-like rows
             cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             db_type = "PostgreSQL"
         elif hasattr(conn, 'driver_name') and conn.driver_name == 'mysql':
-            cursor = conn.cursor(dictionary=True) # Use dictionary cursor for MySQL
+            # Use dictionary=True for MySQL
+            cursor = conn.cursor(dictionary=True)
             db_type = "MySQL"
-        else: # Fallback
+        else: # Fallback (will likely return tuples)
             cursor = conn.cursor()
             db_type = "Fallback (Unknown)"
         logging.debug(f"get_accounts_data: Using {db_type} cursor.")
 
-        # Include account_number in the SELECT
+        # SQL query includes account_number
         sql = """SELECT a.account_id, a.account_number, c.customer_name, a.balance, a.customer_id
                  FROM accounts a JOIN customers c ON a.customer_id = c.customer_id"""
         params = []
@@ -370,28 +371,52 @@ def get_accounts_data(customer_id_filter=None):
                 sql += " WHERE a.customer_id = %s"
                 params.append(filter_id)
             except (ValueError, TypeError): logging.error(f"Invalid filter type: {customer_id_filter}")
-        sql += " ORDER BY a.account_id ASC" # Order by account_id
+        sql += " ORDER BY a.account_id ASC"
         cursor.execute(sql, tuple(params))
-        raw_accounts_results = cursor.fetchall() # List of RealDictRow or dict
+        raw_accounts_results = cursor.fetchall() # List of RealDictRow or dict or tuple
 
         for acc_row_raw in raw_accounts_results:
-            acc_row = dict(acc_row_raw) # Convert row to standard dict
+            # --- REMOVED Problematic Line: acc_row = dict(acc_row_raw) ---
+            # Use acc_row_raw directly (or .get) as it's already dict-like or handle tuple case
+
+            # Use a temporary dict for processing to avoid modifying cursor result directly
+            acc_data = {}
             try:
-                balance_val = acc_row.get('balance')
+                # Safely access data using .get() for dict-like objects or indices for tuples
+                if isinstance(acc_row_raw, (dict, psycopg2.extras.RealDictRow)):
+                    acc_data['account_id'] = acc_row_raw.get('account_id')
+                    acc_data['account_number'] = acc_row_raw.get('account_number')
+                    acc_data['customer_name'] = acc_row_raw.get('customer_name')
+                    acc_data['customer_id'] = acc_row_raw.get('customer_id')
+                    balance_val = acc_row_raw.get('balance')
+                elif isinstance(acc_row_raw, tuple) and len(acc_row_raw) >= 5: # Handle fallback tuple case
+                     # Indices based on the SELECT order: account_id, account_number, customer_name, balance, customer_id
+                     acc_data['account_id'] = acc_row_raw[0]
+                     acc_data['account_number'] = acc_row_raw[1]
+                     acc_data['customer_name'] = acc_row_raw[2]
+                     balance_val = acc_row_raw[3]
+                     acc_data['customer_id'] = acc_row_raw[4]
+                     logging.warning("Processing account data using fallback tuple access.")
+                else:
+                    logging.warning(f"Skipping account row due to unexpected type or structure: {type(acc_row_raw)}")
+                    continue # Skip this row
+
                 # Convert balance via string for robustness
                 current_balance = Decimal(str(balance_val)) if balance_val is not None else Decimal('0.00')
-                # Check for all required keys, including account_number
+                acc_data['balance'] = current_balance # Add processed balance
+
+                # Check for required keys in the processed dict
                 required_keys = ('account_id', 'account_number', 'customer_name', 'customer_id', 'balance')
-                if all(k in acc_row for k in required_keys):
-                    acc_row['balance'] = current_balance
-                    accounts.append(acc_row) # Append the processed dict
+                if all(k in acc_data and acc_data[k] is not None for k in required_keys): # Check keys exist and have values
+                    accounts.append(acc_data) # Append the processed dict
                 else:
-                    missing_keys = [k for k in required_keys if k not in acc_row]
-                    logging.warning(f"Skipping account row missing keys ({missing_keys}): {acc_row.get('account_id')}")
+                    missing_or_none_keys = [k for k in required_keys if k not in acc_data or acc_data[k] is None]
+                    logging.warning(f"Skipping account row missing/None required keys ({missing_or_none_keys}): ID {acc_data.get('account_id')}")
+
             except (InvalidOperation, TypeError, ValueError) as e: # Catch conversion errors
-                logging.warning(f"Acc {acc_row.get('account_id')}: Invalid balance ('{balance_val}'): {e}")
+                logging.warning(f"Acc {acc_data.get('account_id', '?')}: Invalid balance ('{balance_val}'): {e}")
             except Exception as inner_e:
-                logging.error(f"Acc {acc_row.get('account_id')}: Error processing row: {inner_e}", exc_info=True)
+                logging.error(f"Acc {acc_data.get('account_id', '?')}: Error processing row: {inner_e}", exc_info=True)
 
     except DB_ERROR_TYPE as e: # Use global DB_ERROR_TYPE
         logging.error(f"DB error fetch accounts ({db_type}): {e}"); return None
@@ -407,7 +432,7 @@ def get_accounts_data(customer_id_filter=None):
             except Exception: pass
         if conn: close_db_connection(conn)
     return accounts
-  
+
 def get_user_by_email(email):
     """Fetches user details by email. Adapted for PG/MySQL. Returns dict or None."""
     user = None; conn = None; cursor = None; db_type = "Unknown"
