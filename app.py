@@ -27,6 +27,40 @@ if os.path.exists(dotenv_path):
 else:
     print(f"--- .env file not found at {dotenv_path}, using system environment variables ---")
 
+POSTGRES_AVAILABLE = False
+MYSQL_AVAILABLE = False
+MySQLError = None # Define placeholder
+
+try:
+    import psycopg2
+    import psycopg2.extras # Needed for RealDictCursor
+    POSTGRES_AVAILABLE = True
+    print("--- Psycopg2 (PostgreSQL driver) found. ---")
+except ImportError:
+    psycopg2 = None # Define as None if not installed
+    print("--- Psycopg2 (PostgreSQL driver) not found. ---")
+
+try:
+    from mysql.connector import Error as MySQLError_import # Use temp name
+    MySQLError = MySQLError_import # Assign if successful
+    MYSQL_AVAILABLE = True
+    print("--- MySQL Connector found. ---")
+except ImportError:
+    # MySQLError remains None
+    print("--- MySQL Connector not found. ---")
+
+# Define the Database Error Type based on environment
+# (Assuming DATABASE_URL means PostgreSQL, otherwise MySQL)
+if POSTGRES_AVAILABLE and 'DATABASE_URL' in os.environ:
+    DB_ERROR_TYPE = psycopg2.Error if psycopg2 else Exception # Use psycopg2.Error if available, fallback
+    print("--- Using PostgreSQL Error Type (psycopg2.Error) ---")
+elif MYSQL_AVAILABLE and MySQLError:
+    DB_ERROR_TYPE = MySQLError
+    print("--- Using MySQL Error Type (MySQLError) ---")
+else:
+    DB_ERROR_TYPE = Exception # Fallback to generic Exception if specific libs missing
+    print("--- Using generic Exception for DB errors (driver-specific type unavailable) ---")
+  
 # --- Database Import (Using PostgreSQL) ---
 try:
     import psycopg2
