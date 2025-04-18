@@ -1750,50 +1750,83 @@ def profile():
     """Displays the user profile page with details and logout."""
     user_id = g.user['id']
     account = None # Initialize account to None
+    conn = None # Initialize connection variable
+    cursor = None # Initialize cursor variable
+    db_type = "Unknown" # To track which DB is being used
 
-    # Fetch associated account details for the logged-in user
-    conn = get_db_connection()
-    cursor = None
-    if conn:
-        try:
+    try:
+        conn = get_db_connection() # Get connection first
+        if not conn:
+            # Raise an error or handle appropriately if connection failed
+            raise ConnectionError("Database connection failed.")
+
+        # --- Cursor Creation based on DB type ---
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            # Using PostgreSQL (check instance type for safety)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            db_type = "PostgreSQL"
+        elif MYSQL_AVAILABLE and hasattr(conn, 'is_connected'): # Heuristic for MySQL conn
+            # Using MySQL
             cursor = conn.cursor(dictionary=True)
-            # Fetch the primary account associated with the customer ID
-            cursor.execute("""
-                SELECT account_id, account_number, balance
-                FROM accounts
-                WHERE customer_id = %s
-                ORDER BY account_id ASC
-                LIMIT 1
-            """, (user_id,))
-            account_raw = cursor.fetchone()
-            if account_raw:
-                 # Ensure balance is Decimal
-                 try:
-                     account_raw['balance'] = Decimal(account_raw['balance'])
-                 except (InvalidOperation, TypeError):
-                      logging.warning(f"Could not convert balance '{account_raw['balance']}' to Decimal for user {user_id}")
-                      account_raw['balance'] = Decimal('0.00') # Default on error
-                 account = account_raw # Assign the processed dict
-            else:
-                 logging.warning(f"No account found for user {user_id} in profile page.")
+            db_type = "MySQL"
+        else:
+            # Fallback (might error later, but attempts basic cursor)
+            cursor = conn.cursor()
+            db_type = "Fallback"
+        logging.debug(f"Profile: Using {db_type} cursor.")
+        # --- End Cursor Creation ---
 
-        except MySQLError as e:
-            logging.error(f"DB error fetching account details for profile page (User {user_id}): {e}")
-            flash("Could not load account details due to a database error.", "warning")
-        except Exception as e:
-             logging.error(f"Unexpected error fetching account details for profile (User {user_id}): {e}", exc_info=True)
-             flash("An unexpected error occurred while loading profile details.", "warning")
-        finally:
-            if cursor:
-                try: cursor.close()
-                except MySQLError: pass
+        # Fetch the primary account associated with the customer ID
+        cursor.execute("""
+            SELECT account_id, account_number, balance
+            FROM accounts
+            WHERE customer_id = %s
+            ORDER BY account_id ASC
+            LIMIT 1
+        """, (user_id,))
+        account_raw = cursor.fetchone() # Fetches as RealDictRow (psql) or dict (mysql)
+
+        if account_raw:
+             # Ensure balance is Decimal
+             try:
+                 # Convert balance via string for better cross-DB compatibility
+                 raw_balance = account_raw.get('balance', '0.00') # Get balance safely
+                 account_raw['balance'] = Decimal(str(raw_balance))
+             except (InvalidOperation, TypeError, ValueError) as dec_err:
+                  logging.warning(f"Profile: Could not convert balance '{raw_balance}' to Decimal for user {user_id}: {dec_err}")
+                  account_raw['balance'] = Decimal('0.00') # Default on error
+
+             # Convert row to standard dict before passing to template
+             account = dict(account_raw)
+        else:
+             logging.warning(f"No account found for user {user_id} in profile page.")
+
+    # --- Catch appropriate DB Error ---
+    except DB_ERROR_TYPE as e: # Use the DB_ERROR_TYPE defined based on environment
+        logging.error(f"Profile: DB error fetching account details (User {user_id}) using {db_type}: {e}")
+        flash("Could not load account details due to a database error.", "warning")
+    # --- Catch ConnectionError specifically ---
+    except ConnectionError as e:
+         logging.error(f"Profile: Connection Error for user {user_id}: {e}")
+         flash(str(e), "error") # Show connection error message
+    # --- Catch other potential errors ---
+    except Exception as e:
+         logging.error(f"Profile: Unexpected error fetching account details (User {user_id}): {e}", exc_info=True)
+         flash("An unexpected error occurred while loading profile details.", "warning")
+    # --- Ensure cleanup in finally ---
+    finally:
+        if cursor:
+            try: cursor.close()
+            # Catch potential close errors for the specific DB type or fallback
+            except DB_ERROR_TYPE: pass
+            except Exception: pass
+        if conn:
+            # Use your existing close_db_connection helper
             close_db_connection(conn)
-    else:
-        flash("Database connection unavailable. Cannot load full profile.", "error")
 
     # Pass user (from g) and account details (fetched or None) to the template
     return render_template('profile.html', user=g.user, account=account)
-
+  
 @app.route('/fraud')
 @login_required
 def fraud_page():
