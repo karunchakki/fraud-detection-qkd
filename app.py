@@ -1008,7 +1008,7 @@ def forgot_password():
         if user:
             try:
                 # Generate Timed Token
-                token_expiration_seconds = 3600 # 1 hour validity
+                token_expiration_seconds = 600 # 10 minutes* 60 seconds validity
                 token = serializer.dumps(email, salt='password-reset-salt')
                 reset_url = url_for('reset_password', token=token, _external=True)
                 logging.info(f"Generated password reset token/URL for {email}")
@@ -1086,7 +1086,7 @@ def reset_password(token):
     email = None
     try:
         # Validate token and extract email
-        email = serializer.loads(token, salt='password-reset-salt', max_age=3600) # 1 hour expiry
+        email = serializer.loads(token, salt='password-reset-salt', max_age=600) # 10 minutes expiry
         logging.info(f"Valid password reset token decoded for: {email}")
     except SignatureExpired:
         flash('Password reset link has expired.', 'error')
