@@ -41,6 +41,9 @@
                 <thead class="bg-gray-100 dark:bg-gray-700">
                     <tr>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account ID</th>
+                        {# === ADD Account Number Header === #}
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account Number</th>
+                        {# === END Header === #}
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account Holder</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Balance</th>
                     </tr>
@@ -49,7 +52,10 @@
                     {% for acc in user_accounts %}
                     <tr>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{{ acc.account_id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800 dark:text-gray-200">{{ acc.customer_name }}</td>
+                        {# === ADD Account Number Data Cell === #}
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700 dark:text-gray-300">{{ acc.account_number | default('N/A') }}</td>
+                        {# === END Data Cell === #}
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800 dark:text-gray-200">{{ acc.customer_name | e }}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-700 dark:text-gray-300">₹{{ "%.2f"|format(acc.balance) }}</td>
                     </tr>
                     {% endfor %}
@@ -65,7 +71,7 @@
 
     <!-- Transaction Input Form -->
      {# --- Perform Secure Transfer Title --- #}
-    <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-5 border-b dark:border-gray-600 pb-2">Perform Secure Transfer</h3>
+    <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-5 border-b dark:border-gray-600 pb-2" id="perform-transfer">Perform Secure Transfer</h3> {# Added id for anchor link #}
     {% if user_accounts and receiver_accounts %}
 
         {# --- Render Form using WTForms (if enabled) --- #}
@@ -76,10 +82,10 @@
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <!-- From Account (Display Only) -->
                      <div>
-                         {# --- From Account Label --- #}
                         <label for="display_sender_account" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Your Account:</label>
+                        {# Display Account Number in the "From" field too #}
                         <input type="text" id="display_sender_account" disabled
-                               value="{{ user_accounts[0].account_id }} - (Bal: ₹{{ "%.2f"|format(user_accounts[0].balance) }})"
+                               value="{{ user_accounts[0].account_number | default(user_accounts[0].account_id) }} (Bal: ₹{{ "%.2f"|format(user_accounts[0].balance) }})"
                                class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm cursor-not-allowed">
                         {# Hidden input to actually send the sender ID #}
                         <input type="hidden" name="sender_account_id" value="{{ user_accounts[0].account_id }}">
@@ -87,7 +93,6 @@
 
                     <!-- To Account (WTForms Select Field) -->
                     <div>
-                         {# --- To Account Label --- #}
                         <label for="{{ transfer_form.receiver_account_id.id }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ transfer_form.receiver_account_id.label }}</label>
                         {{ transfer_form.receiver_account_id(class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm") }}
                         {% if transfer_form.receiver_account_id.errors %}
@@ -99,7 +104,6 @@
 
                      <!-- Amount (WTForms Decimal Field) -->
                      <div>
-                         {# --- Amount Label --- #}
                         <label for="{{ transfer_form.amount.id }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ transfer_form.amount.label }} (INR)</label>
                         {{ transfer_form.amount(class="mt-1 block w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm", placeholder="e.g., ₹500.00") }}
                         {% if transfer_form.amount.errors %}
@@ -114,7 +118,6 @@
                 <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                     {% if transfer_form.simulate_eve %}
                         {{ transfer_form.simulate_eve(class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded mr-2") }}
-                         {# --- Simulate Eve Label --- #}
                         <label for="{{ transfer_form.simulate_eve.id }}" class="text-sm font-medium text-gray-700 dark:text-gray-300 ml-2">
                             {{ transfer_form.simulate_eve.label }}
                             <span class="text-xs text-gray-500 dark:text-gray-400">(Increases QKD errors, may abort transfer)</span>
@@ -125,7 +128,6 @@
                             </div>
                         {% endif %}
                     {% else %}
-                         {# Fallback rendering if simulate_eve not in form definition #}
                          <input type="checkbox" id="simulate_eve_fallback" name="simulate_eve" value="true"
                                 class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
                          <label for="simulate_eve_fallback" class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -144,40 +146,40 @@
 
         {# --- Fallback: Render Form Manually if WTForms is not available --- #}
         {% else %}
-            <form action="{{ url_for('transfer_funds') }}" method="post" class="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+             {# ... (Manual form block remains the same) ... #}
+             <form action="{{ url_for('transfer_funds') }}" method="post" class="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
                  <p class="text-sm text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 p-3 rounded border border-orange-200 dark:border-orange-600">Note: Advanced form features (like CSRF protection) are disabled as Flask-WTF is not available.</p>
                  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <!-- From Account (Manual) -->
                     <div>
-                         {# --- From Account Label (Manual) --- #}
-                        <label for="sender_account_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Your Account:</label>
-                        <select id="sender_account_id" name="sender_account_id" required
+                        <label for="sender_account_id_manual" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Your Account:</label>
+                        <select id="sender_account_id_manual" name="sender_account_id" required
                                 class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
                             <option value="" disabled selected>Select Account</option>
                             {% for acc in user_accounts %}
-                            <option value="{{ acc.account_id }}">{{ acc.account_id }} - (Bal: ₹{{ "%.2f"|format(acc.balance) }})</option>
+                            {# Display Account Number in Manual Dropdown Too #}
+                            <option value="{{ acc.account_id }}">{{ acc.account_number | default(acc.account_id) }} - (Bal: ₹{{ "%.2f"|format(acc.balance) }})</option>
                             {% endfor %}
                         </select>
                     </div>
 
                     <!-- To Account (Manual) -->
                     <div>
-                         {# --- To Account Label (Manual) --- #}
-                        <label for="receiver_account_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Account:</label>
-                         <select id="receiver_account_id" name="receiver_account_id" required
+                        <label for="receiver_account_id_manual" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Account:</label>
+                         <select id="receiver_account_id_manual" name="receiver_account_id" required
                                 class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
                             <option value="" disabled selected>Select Receiver</option>
                              {% for acc in receiver_accounts %}
-                            <option value="{{ acc.account_id }}">{{ acc.account_id }} - {{ acc.customer_name }}</option>
+                             {# Display Account Number in Receiver Dropdown Too #}
+                            <option value="{{ acc.account_id }}">{{ acc.account_number | default(acc.account_id) }} - {{ acc.customer_name }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
                      <!-- Amount (Manual) -->
                      <div>
-                         {# --- Amount Label (Manual) --- #}
-                        <label for="amount" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount (INR):</label>
-                        <input type="text" id="amount" name="amount" placeholder="e.g., ₹500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount (e.g., 500 or 500.00)"
+                        <label for="amount_manual" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount (INR):</label>
+                        <input type="text" id="amount_manual" name="amount" placeholder="e.g., ₹500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount (e.g., 500 or 500.00)"
                                class="mt-1 block w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
                     </div>
                  </div>
@@ -186,7 +188,6 @@
                 <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                     <input type="checkbox" id="simulate_eve_transfer" name="simulate_eve" value="true"
                            class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded mr-2">
-                     {# --- Simulate Eve Label (Manual) --- #}
                     <label for="simulate_eve_transfer" class="text-sm font-medium text-gray-700 dark:text-gray-300 ml-2">
                         Simulate Eavesdropper (Eve)?
                         <span class="text-xs text-gray-500 dark:text-gray-400">(Increases QKD errors, may abort transfer)</span>
@@ -217,26 +218,21 @@
     <!-- Display Result of the Last Transfer Attempt -->
     {% if last_transfer_outcome %}
     <div class="mt-6 mb-8">
-         {# --- Last Transfer Title --- #}
          <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b dark:border-gray-600 pb-2">Last Transfer Attempt Outcome</h3>
-         {# Apply dark mode classes to the result box #}
          <div class="p-4 rounded-md shadow-sm text-sm
             {% if last_transfer_outcome.status == 'Success' %} bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 text-green-800 dark:text-green-200
             {% else %} bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-200 {% endif %}">
 
+            {# ... (rest of last_transfer_outcome block remains the same) ... #}
             <p class="mb-2"><span class="font-semibold">Status:</span>
                 <span class="font-bold">{{ last_transfer_outcome.status }}</span>
             </p>
             {% if last_transfer_outcome.reason %}
                  <p class="mb-2"><span class="font-semibold">Reason:</span> {{ last_transfer_outcome.reason }}</p>
             {% endif %}
-
-             {# Display amount with Rupee symbol #}
              {% if last_transfer_outcome.amount %}
                   <p class="mb-2"><span class="font-semibold">Attempted Amount:</span> ₹{{ last_transfer_outcome.amount }}</p>
              {% endif %}
-
-            {# Show QKD specific info #}
             {% if last_transfer_outcome.qber is defined %}
                  <p class="mb-2"><span class="font-semibold">QBER:</span>
                     <span class="font-mono">{{ last_transfer_outcome.qber }}</span>
@@ -245,8 +241,6 @@
                     {% endif %}
                  </p>
             {% endif %}
-
-            {# Show Fraud info #}
             {% if last_transfer_outcome.fraud_check %}
                 <p class="mb-2"><span class="font-semibold">Fraud Check:</span>
                     {% if last_transfer_outcome.fraud_check.is_fraudulent %}
@@ -259,16 +253,12 @@
                      <p class="text-xs text-current opacity-80"><span class="font-semibold">ML Score:</span> {{ "%.3f" | format(last_transfer_outcome.fraud_check.ml_score) }}</p>
                  {% endif %}
             {% endif %}
-
-            {# Show Log ID and Links #}
             {% if last_transfer_outcome.log_id %}
                  <p class="mb-1 mt-3 border-t border-current border-opacity-20 pt-2"><span class="font-semibold">Log ID:</span> {{ last_transfer_outcome.log_id }}
                      <a href="{{ url_for('history') }}" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs ml-2">(View History)</a>
                      <a href="{{ url_for('show_report_page', log_id=last_transfer_outcome.log_id) }}" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs ml-2">(View Report Details)</a>
                  </p>
             {% endif %}
-
-            {# Link to QKD page #}
             {% if last_transfer_outcome.qkd_log_stored %}
              <a href="{{ url_for('qkd_page') }}" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium mt-2 inline-block">View Full QKD Log →</a>
             {% endif %}
