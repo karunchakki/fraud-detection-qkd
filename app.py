@@ -976,33 +976,102 @@ def logout():
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
-    if g.user: return redirect(url_for('index'))
-    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None
-    if not MAIL_AVAILABLE or not serializer: flash("Password reset unavailable.", "warning"); return redirect(url_for('login'))
+    """Handles password reset request (sending email)."""
+    if g.user: return redirect(url_for('index')) # Redirect if already logged in
+    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None # Instantiate form
 
+    # --- Prerequisite Check ---
+    if not MAIL_AVAILABLE or not serializer:
+        log_msg = "Password reset unavailable:"
+        if not MAIL_AVAILABLE: log_msg += " Mail system not configured/available."
+        if not serializer: log_msg += " Serializer not initialized (SECRET_KEY issue?)."
+        logging.warning(log_msg)
+        flash("Password reset service is currently unavailable.", "warning")
+        return redirect(url_for('login'))
+
+    # --- Handle POST Request ---
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
-        email = form.email.data if WTFORMS_AVAILABLE else request.form.get('email','').strip().lower()
-        if not email or '@' not in email: flash("Valid email required.", "error"); return render_template('forgot_password.html', form=form)
 
-        logging.info(f"Password reset requested for {email}")
+        # --- 1. Extract Email ---
+        email = form.email.data if WTFORMS_AVAILABLE else request.form.get('email','').strip().lower()
+        if not email or '@' not in email:
+             flash("Please enter a valid email address.", "error")
+             return render_template('forgot_password.html', form=form)
+
+        logging.info(f"Password reset requested for email: {email}")
+
+        # --- 2. Check if User Exists ---
         user = get_user_by_email(email)
+
+        # --- 3. Generate Token and Send Email (only if user exists) ---
         if user:
             try:
+                # Generate Timed Token
+                token_expiration_seconds = 3600 # 1 hour validity
                 token = serializer.dumps(email, salt='password-reset-salt')
                 reset_url = url_for('reset_password', token=token, _external=True)
-                subject = "Reset QSB Password"; sender_display_tuple = ("QSB Secure Banking", app.config['MAIL_DEFAULT_SENDER'])
-                recipients = [email]; email_body = f"Hello {user.get('customer_name', 'User')},\n\nClick to reset:\n{reset_url}\n\nExpires in 1 hour.\n\nQSB Team"
-                msg = Message(subject=subject, sender=sender_display_tuple, recipients=recipients, body=email_body)
-                thread = Thread(target=send_async_email, args=[current_app.app_context(), msg]); thread.start()
-                logging.info(f"Password reset email queued for {email}")
-            except Exception as e: logging.error(f"ERROR sending reset email for {email}: {e}", exc_info=True)
-        else: logging.info(f"Password reset for non-existent email: {email}")
-        flash('If account exists, email sent. Check spam folder.', 'info') # Updated flash
-        return redirect(url_for('login'))
-    return render_template('forgot_password.html', form=form)
+                logging.info(f"Generated password reset token/URL for {email}")
 
-# Inside app.py
+                # Prepare Email Content
+                subject = "Password Reset Request - QSB Secure Bank"
+                recipients = [email] # List of recipients
+                email_body = f"""Hello {user.get('customer_name', 'Valued Customer')},
+
+You requested to reset your password for your QSB Secure Bank account.
+Click the link below to set a new password:
+
+{reset_url}
+
+This link is valid for {token_expiration_seconds // 60} minutes.
+
+If you did not request this, please ignore this email.
+
+Thank you,
+The QSB Secure Bank Team"""
+
+                # --- MODIFIED SENDER LOGIC ---
+                # Explicitly use only the email address from config as the sender address
+                # Prefer MAIL_USERNAME as it's used for auth, fallback to MAIL_DEFAULT_SENDER if needed
+                # Ensure MAIL_DEFAULT_SENDER env var is also JUST the email on Render
+                sender_email_address = app.config.get('MAIL_USERNAME') or app.config.get('MAIL_DEFAULT_SENDER')
+
+                if not sender_email_address:
+                     logging.critical("CRITICAL: Mail sender (MAIL_USERNAME or MAIL_DEFAULT_SENDER) is not configured in environment variables!")
+                     # Don't flash specific internal errors to user
+                     # Fall through to generic message, but log critical error
+                else:
+                     logging.debug(f"Using sender email address: {sender_email_address}")
+                     # Create the Flask-Mail Message object using only the email string for sender
+                     msg = Message(subject=subject,
+                                   sender=sender_email_address, # Explicitly use just the email address
+                                   recipients=recipients,
+                                   body=email_body)
+
+                     # Queue the email for sending in a background thread
+                     thread = Thread(target=send_async_email, args=[current_app.app_context(), msg])
+                     thread.start()
+                     logging.info(f"Password reset email queued for background sending to {email}")
+                # --- END MODIFIED SENDER LOGIC ---
+
+            except Exception as e:
+                # Log errors during token generation or email queuing
+                logging.error(f"ERROR generating token or queueing email for {email}: {e}", exc_info=True)
+                # IMPORTANT: Do not flash a specific error here
+
+        elif not user:
+            # Log the attempt for a non-existent email but don't inform the requester
+            logging.info(f"Password reset requested for non-existent email address: {email}")
+
+        # --- 4. Show Generic Confirmation Message ---
+        # Always flash the same message regardless of user existence or internal errors
+        flash('If an account with that email address exists, instructions have been sent. Please also check your spam or junk folder.', 'info')
+        return redirect(url_for('login')) # Redirect after processing
+
+    # --- Handle GET Request ---
+    # Show the forgot password form initially
+    return render_template('forgot_password.html', form=form)
+  
 
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
