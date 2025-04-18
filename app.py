@@ -27,6 +27,9 @@ if os.path.exists(dotenv_path):
 else:
     print(f"--- .env file not found at {dotenv_path}, using system environment variables ---")
 
+
+# --- Database Import (Using PostgreSQL) ---
+
 POSTGRES_AVAILABLE = False
 MYSQL_AVAILABLE = False
 MySQLError = None # Define placeholder
@@ -60,17 +63,6 @@ elif MYSQL_AVAILABLE and MySQLError:
 else:
     DB_ERROR_TYPE = Exception # Fallback to generic Exception if specific libs missing
     print("--- Using generic Exception for DB errors (driver-specific type unavailable) ---")
-  
-# --- Database Import (Using PostgreSQL) ---
-try:
-    import psycopg2
-    from psycopg2 import Error as DBError # Use DBError alias
-    # Optional: Use DictCursor for easier row access
-    import psycopg2.extras
-    print("--- PostgreSQL driver (psycopg2) found. ---")
-except ImportError:
-    print("\nERROR: 'psycopg2-binary' not found. Please install it: pip install psycopg2-binary")
-    exit(1)
 
 # --- Security & Authentication ---
 from werkzeug.security import generate_password_hash, check_password_hash
