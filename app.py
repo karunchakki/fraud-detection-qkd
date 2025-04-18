@@ -848,7 +848,13 @@ def register_customer():
                 if needs_rollback:
                     try: conn.rollback(); logging.warning(f"Registration rolled back for '{email}'.")
                     except Exception as rb_err: logging.error(f"Rollback failed: {rb_err}")
-                if cursor: try: cursor.close() except: pass
+                if cursor:
+                    try:
+                        cursor.close()
+                    except DB_ERROR_TYPE: # Use global type
+                        pass # Ignore DB-specific errors closing cursor
+                    except Exception as cur_close_err:
+                        logging.warning(f"Non-DB error closing registration cursor: {cur_close_err}")
                 close_db_connection(conn)
 
         # Re-render form if transaction failed
