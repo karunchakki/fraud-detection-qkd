@@ -708,9 +708,13 @@ def register_customer():
         except Exception as e:
             logging.error(f"Unexpected pre-check error: {e}", exc_info=True); flash("Unexpected pre-check error.", "error"); error_occurred = True
         finally:
-             if cursor: try: cursor.close() except: pass
-             # Close connection ONLY if check failed or error occurred. Keep open for insert otherwise.
-             if (user_exists or error_occurred) and conn and not getattr(conn, 'closed', True):
+             if cursor:
+                    try:
+                        cursor.close()
+                    except DB_ERROR_TYPE: # Catch specific DB error on close
+                        pass # Ignore DB-specific errors closing cursor
+                    except Exception as cur_close_e: # Catch other errors
+                        logging.warning(f"Non-DB error closing registration cursor: {cur_close_e}")
                  close_db_connection(conn)
 
         if user_exists or error_occurred: return render_template('register.html', form=form)
