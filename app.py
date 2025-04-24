@@ -463,43 +463,93 @@ else:
     TransferForm = DummyForm
 # *** END FORMS DEFINITION ***
 
-# --- Database Helper Functions ---
+# --- Database Helper Functions (Adapted for PostgreSQL/MySQL) ---
 def get_db_connection():
-    """Establishes and returns a new database connection."""
+    """
+    Establishes and returns a database connection based on environment.
+    Prioritizes PostgreSQL using DATABASE_URL (for Render).
+    Falls back to MySQL using MYSQL_CONFIG (for local testing).
+    Returns the connection object or None on failure.
+    """
     conn = None
-    try:
-        conn = mysql.connector.connect(**MYSQL_CONFIG)
-        if conn.is_connected():
-            logging.debug("DB connection successful.")
-            return conn
-        else:
-            # Should not happen if connect() succeeded without error, but handle defensively
-            logging.error("DB connection failed: Connection established but not active.")
-            if conn: conn.close() # Close potentially broken connection
+    db_url = os.environ.get('DATABASE_URL') # Render injects this automatically
+
+    # --- Primary Path: Use DATABASE_URL for PostgreSQL ---
+    if db_url:
+        if not POSTGRES_AVAILABLE:
+            logging.critical("FATAL: DATABASE_URL set, but psycopg2 driver unavailable!")
             return None
-    except MySQLError as e:
-        logging.critical(f"CRITICAL DATABASE CONNECTION ERROR: {e}")
-        if conn: # Ensure closure even if connection failed mid-process
-            try: conn.close()
-            except MySQLError: pass
-        return None
-    except Exception as e: # Catch other errors like config issues
-        logging.critical(f"CRITICAL UNEXPECTED ERROR CONNECTING TO DB: {e}")
-        if conn:
-            try: conn.close()
-            except MySQLError: pass
-        return None
+        try:
+            logging.debug("Attempting PostgreSQL connection via DATABASE_URL.")
+            conn = psycopg2.connect(db_url, connect_timeout=10) # Add timeout
+            # Add 'driver_name' attribute for easier type checking later
+            # Note: psycopg2 connection objects don't have a standard simple 'driver_name'
+            # We might need to rely on isinstance checks later if needed,
+            # or wrap the connection in a custom class if we want this attribute.
+            # For now, just know it's likely PG if db_url was used.
+            logging.info("PostgreSQL connection successful via DATABASE_URL.")
+            return conn
+        except psycopg2.Error as e_pg:
+            logging.critical(f"CRITICAL PG Conn Error: {e_pg}")
+            return None
+        except Exception as e_pg_other:
+            logging.critical(f"CRITICAL Unexpected PG Conn Error: {e_pg_other}", exc_info=True)
+            return None
+    else: # --- MySQL Fallback Path ---
+        logging.debug("DATABASE_URL not set. Attempting MySQL fallback.")
+        if not MYSQL_AVAILABLE:
+            logging.critical("FATAL: MySQL Connector unavailable for fallback!");
+            return None
+        try:
+            logging.debug(f"Attempting MySQL connection: Host={MYSQL_CONFIG.get('host')}")
+            conn = mysql.connector.connect(**MYSQL_CONFIG)
+            if conn.is_connected():
+                 # Add 'driver_name' attribute for consistency if desired
+                 conn.driver_name = 'mysql'
+                 logging.info("MySQL fallback connection successful.")
+                 return conn
+            else:
+                 logging.error("MySQL fallback failed: is_connected() is False.")
+                 if conn: conn.close() # Close potentially broken connection
+                 return None
+        except MySQLError as e_mysql:
+            logging.critical(f"CRITICAL MySQL Fallback Conn Error: {e_mysql}")
+            return None
+        except Exception as e_mysql_other:
+             logging.critical(f"CRITICAL Unexpected MySQL Fallback Conn Error: {e_mysql_other}", exc_info=True)
+             return None
 
 def close_db_connection(conn):
-    """Closes the database connection if it's open."""
-    if conn and conn.is_connected():
-        try:
-            conn.close()
-            logging.debug("Database connection closed.")
-        except MySQLError as e:
-            logging.error(f"Error closing database connection: {e}")
-        except Exception as e:
-             logging.error(f"Unexpected error closing DB connection: {e}")
+    """Safely closes the database connection (PG or MySQL)."""
+    if not conn or not hasattr(conn, 'close'):
+        logging.debug("close_db_connection: Invalid connection object.")
+        return
+    db_type = "Unknown" # Default
+    is_pg = POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection)
+    is_mysql = MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection)
+
+    try:
+        # Check PG specific 'closed' attribute first
+        if is_pg and conn.closed:
+            logging.debug("PostgreSQL connection already closed.")
+            return
+        # Check MySQL is_connected (though close is often idempotent)
+        # if is_mysql and not conn.is_connected():
+        #    logging.debug("MySQL connection already closed or invalid.")
+        #    return
+
+        if is_pg: db_type = "PostgreSQL"
+        elif is_mysql: db_type = "MySQL"
+
+        logging.debug(f"Closing DB connection (Type: {db_type})")
+        conn.close();
+        logging.info("DB connection closed.")
+
+    except DB_ERROR_TYPE as e: # Catch the appropriate error type
+        logging.error(f"DBError closing {db_type} connection: {e}")
+    except Exception as e: # Catch any other unexpected error
+        logging.error(f"Unexpected error closing {db_type} DB conn: {e}", exc_info=True)
+    
 
 def get_accounts_data(customer_id_filter=None):
     """Fetches account data, optionally filtered by customer ID. Returns list or None on DB error."""
