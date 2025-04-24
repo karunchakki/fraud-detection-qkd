@@ -2750,50 +2750,75 @@ def profile():
     return render_template('profile.html', user=g.user, account=account)
 
 def get_flagged_transactions(user_id, limit=50):
-    """Fetches recently flagged transactions involving the user."""
-    txns = []; conn = get_db_connection(); cursor = None
-    if not conn:
-        logging.error(f"DB Conn fail flagged tx for user {user_id}")
-        return txns # Return empty list
+    """
+    Fetches recently flagged transactions involving the user.
+    Adapted for PostgreSQL/MySQL.
+    """
+    txns = [] # Initialize list for results
+    conn = None # Initialize connection outside try
+    cursor = None # Initialize cursor outside try
+    db_type = "Unknown" # Initialize
 
     try:
-        cursor = conn.cursor(dictionary=True)
-        sql = """SELECT l.log_id, l.timestamp AS ts, s_cust.customer_name AS sender,
-                       r_cust.customer_name AS receiver, l.amount, l.fraud_reason
-                  FROM qkd_transaction_log l
-                  LEFT JOIN accounts s ON l.sender_account_id=s.account_id
-                  LEFT JOIN customers s_cust ON s.customer_id=s_cust.customer_id
-                  LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
-                  LEFT JOIN customers r_cust ON r.customer_id=r_cust.customer_id
-                  WHERE (s.customer_id=%s OR r.customer_id=%s) AND l.is_flagged=TRUE
-                  ORDER BY l.timestamp DESC LIMIT %s"""
-        cursor.execute(sql, (user_id, user_id, limit))
-        raw = cursor.fetchall()
+        conn = get_db_connection() # Attempt to get connection
+        if not conn:
+            logging.error(f"DB Connection failed fetching flagged tx for user {user_id}")
+            return txns # Return empty list
 
-        for entry in raw:
-             try: # Process each row safely
-                 amt = Decimal(entry.get('amount', '0.00'))
-                 ts_str = entry.get('ts').strftime('%Y-%m-%d %H:%M:%S') if entry.get('ts') else 'N/A' # Use full timestamp
+        # --- CORRECTED CURSOR CREATION ---
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDictCursor for PG
+            db_type = "PostgreSQL"
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            cursor = conn.cursor(dictionary=True) # Use dictionary=True for MySQL
+            db_type = "MySQL"
+        else:
+            logging.warning("get_flagged_transactions: Unknown DB connection type, using basic cursor.")
+            cursor = conn.cursor() # Fallback
+            db_type = "Fallback"
+        logging.debug(f"get_flagged_transactions: Using {db_type} cursor.")
+        # --- END CORRECTION ---
+
+        sql = """
+            SELECT
+                l.log_id, l.timestamp AS ts,
+                s_cust.customer_name AS sender,
+                r_cust.customer_name AS receiver,
+                l.amount, l.fraud_reason
+            FROM qkd_transaction_log l
+            LEFT JOIN accounts s ON l.sender_account_id = s.account_id
+            LEFT JOIN customers s_cust ON s.customer_id = s_cust.customer_id
+            LEFT JOIN accounts r ON l.receiver_account_id = r.account_id
+            LEFT JOIN customers r_cust ON r.customer_id = r_cust.customer_id
+            WHERE (s.customer_id = %s OR r.customer_id = %s)
+              AND l.is_flagged = TRUE
+            ORDER BY l.timestamp DESC
+            LIMIT %s
+            """
+        cursor.execute(sql, (user_id, user_id, limit))
+        raw_flagged_txns = cursor.fetchall()
+
+        # Process results safely (rest of the processing logic is likely okay as it uses .get())
+        for entry in raw_flagged_txns:
+             try:
+                 amt_val = entry.get('amount'); amt = Decimal(amt_val) if amt_val is not None else Decimal('0.00')
+                 ts_val = entry.get('ts'); ts_str = ts_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(ts_val, datetime.datetime) else 'N/A'
                  txns.append({
                      'id': entry.get('log_id'), 'timestamp': ts_str,
-                     'sender': f"{entry.get('sender', '?')}",
-                     'receiver': f"{entry.get('receiver', '?')}",
-                     'amount': f"{amt:.2f}",
-                     'fraud_reason': entry.get('fraud_reason', 'N/A') })
-             except Exception as fe:
-                 logging.warning(f"Error formatting flagged tx {entry.get('log_id', '?')}: {fe}")
+                     'sender': f"{entry.get('sender', '?')}", 'receiver': f"{entry.get('receiver', '?')}",
+                     'amount': f"{amt:.2f}", 'fraud_reason': entry.get('fraud_reason', 'N/A')
+                 })
+             except Exception as fe: logging.warning(f"Error formatting flagged tx {entry.get('log_id', '?')}: {fe}")
 
-    except MySQLError as e:
-        logging.error(f"Flagged tx DB error user {user_id}: {e}", exc_info=True)
-        flash("Error loading flagged transaction data.", "error") # Flash error in the calling context
-    except Exception as e:
+    except DB_ERROR_TYPE as e: # Catch specific DB errors
+        logging.error(f"Flagged tx DB error ({db_type}) user {user_id}: {e}", exc_info=True)
+    except Exception as e: # Catch other unexpected errors
         logging.error(f"Unexpected error loading flagged tx user {user_id}: {e}", exc_info=True)
-        flash("Unexpected error loading flagged transactions.", "error")
-    finally: # Ensure cleanup
-        if cursor: cursor.close()
-        close_db_connection(conn)
-    return txns
+    finally: # Ensure resources are always cleaned up
+        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
+        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
 
+    return txns
 
 @app.route('/fraud')
 @login_required
