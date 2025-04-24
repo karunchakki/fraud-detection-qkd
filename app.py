@@ -1,7 +1,7 @@
 # FINAL COMPLETE VERSION - QKD Secure Banking Demo
-# Includes: User Auth, PostgreSQL, QKD Sim, Fernet Encryption, ML Fraud Detection,
+# Includes: User Auth, MySQL, QKD Sim, Fernet Encryption, ML Fraud Detection,
 #           PDF Reporting, Info Pages, Risk Simulation, Real Email Sending.
-# Version: Adapted for Render PostgreSQL Deployment
+# Version: Verified Working (Post User Confirmation & Final Cleanup)
 
 # --- Core Imports ---
 from flask import (Flask, request, render_template, flash, redirect, url_for,
@@ -16,6 +16,9 @@ import logging
 import random
 from threading import Thread
 from decimal import Decimal, InvalidOperation
+from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
+from flask_mail import Mail, Message
+from cryptography.fernet import Fernet, InvalidToken
 
 # --- Environment Variable Loading ---
 from dotenv import load_dotenv
@@ -28,49 +31,75 @@ if os.path.exists(dotenv_path):
 else:
     print(f"--- .env file not found at {dotenv_path}, using system environment variables ---")
 
-# --- Database Import (Using PostgreSQL) ---
+# --- Database Import ---
 POSTGRES_AVAILABLE = False
 MYSQL_AVAILABLE = False
-MySQLError = None # Define placeholder
+MySQLError = None # Define placeholder for MySQL error type
 
 # --- Attempt PostgreSQL Import ---
 try:
-    import psycopg2
-    import psycopg2.extras # Needed for RealDictCursor
-    POSTGRES_AVAILABLE = True
+    import psycopg2         # <--- Import the library
+    import psycopg2.extras
+    POSTGRES_AVAILABLE = True # <--- UPDATE the global variable
     logging.info("--- Psycopg2 (PostgreSQL driver) found. ---")
 except ImportError:
-    psycopg2 = None # Define as None if import fails
+    psycopg2 = None # Define psycopg2 as None if import fails
     logging.warning("--- Psycopg2 (PostgreSQL driver) not found. ---")
 except Exception as e:
     psycopg2 = None
     logging.error(f"--- Unexpected error importing psycopg2: {e} ---")
 
+
 # --- Attempt MySQL Import ---
 try:
-    import mysql.connector # Import the main connector library
-    from mysql.connector import Error as MySQLError_import # Import Error specifically
-    MySQLError = MySQLError_import # Assign to the global placeholder if import succeeds
-    MYSQL_AVAILABLE = True
-    logging.info("--- MySQL Connector found. ---")
+    import mysql.connector
+    from mysql.connector import Error as MySQLConnectorError
+    MySQLError = MySQLConnectorError # Update the global variable
+    MYSQL_AVAILABLE = True          # Update the global variable
+    logging.info("--- MySQL Connector ('mysql-connector-python') found and imported successfully. ---")
 except ImportError:
     # MySQLError remains None, MYSQL_AVAILABLE remains False
-    logging.warning("--- MySQL Connector ('mysql-connector-python') not found. It's required for local MySQL execution. ---")
+    logging.warning("--- MySQL Connector ('mysql-connector-python') not found. ---")
 except Exception as e:
     # MySQLError remains None, MYSQL_AVAILABLE remains False
-    logging.error(f"--- Unexpected error importing MySQL Connector: {e} ---")
+    logging.error(f"--- An unexpected error occurred while importing MySQL Connector: {e} ---", exc_info=True)
 
-# Define the Database Error Type based on environment
-# (Assuming DATABASE_URL means PostgreSQL, otherwise MySQL)
+except ImportError:
+    # This specific error means the library isn't installed
+    # MYSQL_AVAILABLE remains False, MySQLError remains None (as initialized)
+    logging.warning("--- MySQL Connector ('mysql-connector-python') not found. MySQL functionality will be disabled unless installed. ---")
+
+except Exception as e:
+    # Catch any other unexpected error during the import process
+    # MYSQL_AVAILABLE remains False, MySQLError remains None (as initialized)
+    logging.error(f"--- An unexpected error occurred while importing MySQL Connector: {e} ---", exc_info=True) # Log full traceback for unexpected errors
+
+# --- Define the Database Error Type based on environment ---
+# (Assumes DATABASE_URL indicates PostgreSQL on Render, otherwise tries MySQL)
 if POSTGRES_AVAILABLE and 'DATABASE_URL' in os.environ:
-    DB_ERROR_TYPE = psycopg2.Error if psycopg2 else Exception # Use psycopg2.Error if available, fallback
-    print("--- Using PostgreSQL Error Type (psycopg2.Error) ---")
+    # Use psycopg2.Error if psycopg2 was successfully imported, otherwise fallback
+    # Ensure psycopg2 is not None before accessing .Error
+    DB_ERROR_TYPE = psycopg2.Error if psycopg2 else Exception
+    logging.info(f"--- Using PostgreSQL Error Type ({DB_ERROR_TYPE.__name__}) ---")
 elif MYSQL_AVAILABLE and MySQLError:
+    # Use MySQLError if mysql.connector was imported successfully
     DB_ERROR_TYPE = MySQLError
-    print("--- Using MySQL Error Type (MySQLError) ---")
+    logging.info(f"--- Using MySQL Error Type ({DB_ERROR_TYPE.__name__}) ---")
 else:
-    DB_ERROR_TYPE = Exception # Fallback to generic Exception if specific libs missing
-    print("--- Using generic Exception for DB errors (driver-specific type unavailable) ---")
+    # Fallback to generic Exception if neither specific driver error type is available
+    DB_ERROR_TYPE = Exception
+    logging.warning(f"--- Using generic Exception for DB errors (driver-specific type unavailable: PG={POSTGRES_AVAILABLE}, MySQL={MYSQL_AVAILABLE}) ---")
+
+# --- Check if at least one driver is needed and available (Optional but Recommended) ---
+# Decide if your app absolutely requires *at least one* DB driver to even start
+# For example, if running locally without DATABASE_URL, you NEED MySQL.
+# if 'DATABASE_URL' not in os.environ and not MYSQL_AVAILABLE:
+#    logging.critical("CRITICAL: Running locally but MySQL Connector is not available. Exiting.")
+#    exit(1)
+# If running on Render (DATABASE_URL is set), you might want to ensure PG is available:
+# elif 'DATABASE_URL' in os.environ and not POSTGRES_AVAILABLE:
+#    logging.critical("CRITICAL: DATABASE_URL is set but Psycopg2 is not available. Exiting.")
+#    exit(1)
 
 # --- Security & Authentication ---
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -85,12 +114,13 @@ WTFORMS_AVAILABLE = False
 try:
     from flask_wtf import FlaskForm
     from wtforms import StringField, PasswordField, SubmitField, EmailField, DecimalField, SelectField, BooleanField
-    from wtforms.validators import DataRequired, Email, EqualTo, Length, NumberRange, InputRequired, Optional
+    from wtforms.validators import (DataRequired, Email, EqualTo, Length, NumberRange, InputRequired,Optional) 
     WTFORMS_AVAILABLE = True
     print("--- Flask-WTF and WTForms found. Forms enabled. ---")
 except ImportError:
      print("\nWARNING: 'Flask-WTF' or 'WTForms' not found. Form validation will be basic.")
-     FlaskForm = None
+     FlaskForm = None # Set to None if import fails
+     # Define dummy classes below after checking FlaskForm
 
 # --- Email Sending (Flask-Mail) ---
 MAIL_AVAILABLE = False
@@ -99,28 +129,35 @@ try:
     MAIL_AVAILABLE = True
     print("--- Flask-Mail found. Email features potentially available. ---")
 except ImportError:
-    Mail = None; Message = None
-    print("\nWARNING: 'Flask-Mail' not found. Email features disabled.")
+    Mail = None
+    Message = None
+    print("\nWARNING: 'Flask-Mail' not found. Email features (like password reset) disabled.")
 
 # --- Cryptography Import ---
 try:
     from cryptography.fernet import Fernet, InvalidToken
 except ImportError:
-    print("\nERROR: 'cryptography' not found. Install: pip install cryptography"); exit(1)
+    print("\nERROR: 'cryptography' not found. Please install it: pip install cryptography")
+    exit(1)
 
 # --- Data Handling & ML Imports ---
 try:
-    import numpy; import pandas; import joblib; import sklearn
+    import numpy
+    import pandas
+    import joblib
+    import sklearn # Check if scikit-learn is installed
     print("--- NumPy, Pandas, Joblib, Scikit-learn found. ---")
 except ImportError as e:
-    print(f"\nERROR: Missing ML/Data library: {e}. Install required libraries."); exit(1)
+    print(f"\nERROR: Missing ML/Data library: {e}. Please install required libraries (numpy, pandas, joblib, scikit-learn).")
+    exit(1)
 
 # --- PDF Generation Import ---
 try:
     import reportlab
     print("--- ReportLab found. PDF generation enabled. ---")
 except ImportError:
-    print("\nERROR: 'reportlab' not found. PDF reporting disabled."); exit(1)
+    print("\nERROR: 'reportlab' not found. PDF reporting disabled. Please install it: pip install reportlab")
+    exit(1)
 
 
 # --- Local Module Imports ---
@@ -132,9 +169,11 @@ try:
     from ml_fraud_model import load_model as load_ml_model, MODEL_FILENAME, FEATURES_FILENAME
     print("--- Local modules (QKD, Fraud, PDF, Risk, ML Model Loader) found. ---")
 except ImportError as e:
-    print(f"\nERROR: Failed local module import: {e}."); exit(1)
+    print(f"\nERROR: Failed local module import: {e}. Ensure all helper .py files are present and their dependencies are installed.")
+    exit(1)
 except ModuleNotFoundError as e:
-    print(f"\nERROR: Library missing for local modules: {e}"); exit(1)
+    print(f"\nERROR: A library required by local modules might be missing: {e}")
+    exit(1)
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
@@ -142,15 +181,18 @@ app = Flask(__name__)
 # --- Configuration Loading ---
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'a_very_insecure_default_secret_key_32bytes_')
 if app.secret_key == 'a_very_insecure_default_secret_key_32bytes_':
-    print("\nCRITICAL WARNING: Using default FLASK_SECRET_KEY! Set a proper key.")
+    print("\nCRITICAL WARNING: Using default FLASK_SECRET_KEY! Set a proper key in .env or environment.")
 
+# Use WTFORMS_AVAILABLE flag for CSRF config
 app.config['WTF_CSRF_ENABLED'] = WTFORMS_AVAILABLE and os.environ.get('WTF_CSRF_ENABLED', 'True').lower() in ('true', '1', 't')
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'True').lower() in ('true', '1', 't') # Default True for prod
+
+# Session Cookie Settings
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'False').lower() in ('true', '1', 't')
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(minutes=int(os.environ.get('SESSION_LIFETIME_MINUTES', 30)))
 
-# Mail Config (remains the same)
+# Flask-Mail Configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER')
 app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True').lower() in ('true', '1', 't')
@@ -158,24 +200,108 @@ app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'False').lower() in 
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_USERNAME')
+app.config['MAIL_DEFAULT_SENDER'] = ('QuantumVault Security', app.config['MAIL_USERNAME'])
+app.config['QBER_THRESHOLD_PCT'] = int(os.environ.get('QBER_THRESHOLD_PCT', 25)) # Example QBER threshold %
+app.config['QKD_NUM_QUBITS'] = int(os.environ.get('QKD_NUM_QUBITS', 512)) # Example QKD qubit count
 
-mail = None
-if MAIL_AVAILABLE:
+MAIL_AVAILABLE = False
+Mail = None     # Placeholder for the Flask-Mail Mail class
+mail = None     # Placeholder for the Flask-Mail extension instance
+
+# --- Step 1: Attempt to Import Flask-Mail Library ---
+try:
+    from flask_mail import Mail as FlaskMail_Mail # Import the Mail class
+    Mail = FlaskMail_Mail                         # Assign the class if import is successful
+    MAIL_AVAILABLE = True                         # Mark library as potentially available
+    logging.info("--- Flask-Mail library found. Initialization will be attempted based on config. ---")
+except ImportError:
+    # Library itself is not installed
+    logging.warning("--- Flask-Mail library ('Flask-Mail') not found. Email features will be disabled. Install it to enable. ---")
+    # MAIL_AVAILABLE remains False, Mail remains None
+except Exception as import_err:
+    # Catch any other unexpected error during import
+    logging.error(f"--- An unexpected error occurred while importing Flask-Mail: {import_err} ---", exc_info=True)
+    # MAIL_AVAILABLE remains False, Mail remains None
+
+# --- Step 2: Initialize Instance if Library Imported and Config is Valid ---
+if MAIL_AVAILABLE and Mail is not None: # Proceed only if import succeeded
     try:
-        mail = Mail(app)
-        print(f"--- Flask-Mail initialized (Server: {app.config.get('MAIL_SERVER')}). ---")
-    except Exception as mail_init_err:
-        print(f"\nERROR: Failed to initialize Flask-Mail: {mail_init_err}"); mail = None; MAIL_AVAILABLE = False
+        # --- Check Configuration ---
+        mail_server = app.config.get('MAIL_SERVER')
+        mail_port = app.config.get('MAIL_PORT') # Should be integer
+        mail_username = app.config.get('MAIL_USERNAME')
+        # Check if MAIL_PASSWORD key exists in config (value could be empty string)
+        mail_password_present = 'MAIL_PASSWORD' in app.config
+        mail_sender = app.config.get('MAIL_DEFAULT_SENDER') # Often a tuple ('Name', 'email@addr')
 
-# --- Database Configuration (MySQL specific, used only for fallback) ---
-# These are ONLY used if DATABASE_URL is NOT set (i.e., running locally without PostgreSQL)
+        # Check for local SMTP debug server (e.g., MailHog/Mailpit at localhost:1025)
+        # Allows skipping username/password checks for these local tools
+        is_local_debug_server = mail_server == 'localhost' and mail_port == 1025
+
+        essential_config_present = False
+        missing_configs = []
+
+        if is_local_debug_server:
+            # For local debug server, only server/port are strictly needed by Flask-Mail
+            if mail_server and mail_port:
+                essential_config_present = True
+                logging.info("Local debug mail server detected (localhost:1025). Basic config OK.")
+            else:
+                if not mail_server: missing_configs.append("MAIL_SERVER")
+                if not mail_port: missing_configs.append("MAIL_PORT")
+                logging.warning("Local debug mail server config seems incomplete.")
+        else:
+            # For real SMTP servers, check all essential parts
+            if not mail_server: missing_configs.append("MAIL_SERVER")
+            if not mail_port: missing_configs.append("MAIL_PORT")
+            if not mail_username: missing_configs.append("MAIL_USERNAME")
+            if not mail_password_present: missing_configs.append("MAIL_PASSWORD")
+            if not mail_sender: missing_configs.append("MAIL_DEFAULT_SENDER")
+
+            if not missing_configs: # If the list is empty, all are present
+                essential_config_present = True
+            else:
+                logging.warning(f"Flask-Mail configuration for non-local server is incomplete. Missing or empty: {', '.join(missing_configs)}. Email sending likely to fail.")
+
+        # --- Attempt Initialization ---
+        if essential_config_present:
+            # Configuration seems okay (or it's local debug), try initializing
+            mail = Mail(app) # <-- Initialize the Flask-Mail extension instance!
+            logging.info(f"--- Flask-Mail initialized successfully (Server: {mail_server}:{mail_port}). ---")
+            # MAIL_AVAILABLE remains True (set during import check)
+        else:
+            # Config is missing, do not initialize, mark as unavailable
+            logging.error("Flask-Mail initialization skipped due to missing configuration.")
+            mail = None # Ensure instance is None
+            MAIL_AVAILABLE = False # Mark as unavailable due to config
+
+    except Exception as mail_init_err:
+        # Catch errors specifically during the Mail(app) call or config checks
+        logging.error(f"ERROR: Failed to initialize Flask-Mail instance: {mail_init_err}", exc_info=True)
+        mail = None # Ensure instance is None on error
+        MAIL_AVAILABLE = False # Mark as unavailable if initialization fails
+
+else:
+    # This block executes if the initial import failed
+    logging.info("Flask-Mail initialization skipped: Library not found or failed to import.")
+
+# Database Configuration
 MYSQL_HOST = os.environ.get('MYSQL_HOST', 'localhost')
 MYSQL_USER = os.environ.get('MYSQL_USER', 'qkd_app_user')
 MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD')
 MYSQL_DB = os.environ.get('MYSQL_DB', 'qkd_bank_db')
-MYSQL_CONFIG = { 'host': MYSQL_HOST, 'user': MYSQL_USER, 'password': MYSQL_PASSWORD, 'database': MYSQL_DB, 'connection_timeout': 10 }
+if not MYSQL_PASSWORD:
+    print("\nCRITICAL WARNING: MYSQL_PASSWORD is not set in environment variables! Database connection will likely fail.")
+MYSQL_CONFIG = {
+    'host': MYSQL_HOST,
+    'user': MYSQL_USER,
+    'password': MYSQL_PASSWORD,
+    'database': MYSQL_DB,
+    'use_pure': True,
+    'connection_timeout': 10
+}
 
-# App Settings
+# Application-specific Settings
 QBER_THRESHOLD = float(os.environ.get('QBER_THRESHOLD', 0.15))
 QKD_NUM_QUBITS = int(os.environ.get('QKD_NUM_QUBITS', 600))
 INITIAL_BALANCE = Decimal(os.environ.get('INITIAL_BALANCE', '1000.00'))
@@ -183,26 +309,83 @@ app.config['FRAUD_BLACKLIST'] = set(filter(None, os.environ.get('FRAUD_BLACKLIST
 app.config['QBER_THRESHOLD'] = QBER_THRESHOLD
 app.config['INITIAL_BALANCE'] = INITIAL_BALANCE
 if not app.secret_key or app.secret_key == 'a_very_insecure_default_secret_key_32bytes_':
-     raise ValueError("CRITICAL: FLASK_SECRET_KEY is not set.")
+     raise ValueError("CRITICAL: FLASK_SECRET_KEY is not set to a secure value.")
 
-# Serializer
-serializer = None
+# Serializer for Tokens (Password Reset) - Requires SECRET_KEY
+serializer = None # Initialize
 try:
-    if app.secret_key and app.secret_key != 'a_very_insecure_default_secret_key_32bytes_':
-        serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
-except Exception as e: print(f"\nERROR: Failed Serializer init: {e}. Password reset disabled.")
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+except Exception as e:
+    print(f"\nERROR: Failed to initialize URLSafeTimedSerializer: {e}. Password reset disabled.")
+    # Serializer remains None
 
-# Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s [%(name)s:%(lineno)d]')
-logging.getLogger('werkzeug').setLevel(logging.WARNING)
-logging.getLogger('PIL').setLevel(logging.WARNING)
+# Logging Configuration
+try:
+    # 1. Determine Base Log Level
+    #    Checks common environment variables used by Flask for debug mode.
+    #    Alternatively, if 'app' instance is already created, use 'app.debug'.
+    is_debug_mode = os.environ.get('FLASK_ENV') == 'development' or \
+                    os.environ.get('FLASK_DEBUG', '0').lower() in ['1', 'true', 'on']
+    log_level = logging.DEBUG if is_debug_mode else logging.INFO
 
-# Load ML Model
+    # 2. Define Log Format
+    #    Includes logger name and line number - useful for debugging.
+    #    Consider a simpler format for production if this is too verbose.
+    log_format = '%(asctime)s [%(levelname)s] %(name)s:%(lineno)d - %(message)s'
+    #    Simpler alternative: log_format = '%(asctime)s [%(levelname)s] - %(message)s'
+
+    # 3. Configure Root Logger using basicConfig
+    #    Sets the level and format for the root logger.
+    #    NOTE: basicConfig only works if the root logger hasn't been configured yet.
+    #          Call this early in your application setup.
+    logging.basicConfig(level=log_level, format=log_format, force=True) # Use force=True to override potential implicit basicConfig by libraries
+
+    # 4. Adjust Log Levels for Specific Libraries (Reduce Noise)
+    #    Set higher levels (e.g., WARNING) for libraries that are too verbose at INFO/DEBUG.
+    logging.getLogger('werkzeug').setLevel(logging.WARNING) # Quiets standard request logs
+    logging.getLogger('PIL').setLevel(logging.WARNING)     # Quiets Pillow/ReportLab info logs
+
+    # Conditionally configure MySQL logger level ONLY if the library is available
+    if 'MYSQL_AVAILABLE' in globals() and MYSQL_AVAILABLE: # Check flag existence and value
+        logging.getLogger('mysql.connector').setLevel(logging.WARNING)
+        logging.info("MySQL Connector logger level set to WARNING.")
+    else:
+        logging.info("MySQL Connector not available or flag missing; logger level not set.")
+
+    # Configure other libraries as needed:
+    # logging.getLogger('qiskit').setLevel(logging.INFO)
+    # logging.getLogger('matplotlib').setLevel(logging.WARNING)
+
+    logging.info(f"Logging configured successfully. Base level: {logging.getLevelName(log_level)}")
+    if is_debug_mode:
+        logging.debug("Debug logging is enabled.")
+
+except Exception as log_config_err:
+    # Fallback if logging configuration itself fails
+    print(f"CRITICAL ERROR: Failed to configure application logging: {log_config_err}")
+
+# --- Extension Initialization ---
+login_manager = LoginManager(app)
+login_manager.login_view = 'login' # Your login route name
+login_manager.login_message_category = 'info'
+# mail = Mail(app) # Initialize other extensions
+
+# --- User Class Definition (Add Here) ---
+class User(UserMixin):
+    """Simple User class for Flask-Login integration."""
+    def __init__(self, id, name, email):
+        self.id = id
+        self.name = name
+        self.email = email
+
+# Load ML Model at startup
 logging.info("Attempting ML Model load...")
-if not load_ml_model(): logging.critical(f"ML MODEL LOAD FAILED.")
-else: logging.info("ML model loaded successfully.")
+if not load_ml_model():
+    logging.critical(f"ML MODEL LOAD FAILED. Fraud detection may not work correctly.")
+else:
+    logging.info("ML model loaded successfully.")
 
-# --- Forms Definitions ---
+# --- Forms Definition Block ---
 if WTFORMS_AVAILABLE:
     class LoginForm(FlaskForm):
         email = EmailField('Email Address', validators=[DataRequired(), Email()])
@@ -212,9 +395,12 @@ if WTFORMS_AVAILABLE:
     class RegistrationForm(FlaskForm):
          customer_name = StringField('Full Name', validators=[DataRequired(), Length(min=2, max=100)], filters=[lambda x: x.strip() if x else x])
          email = EmailField('Email Address', validators=[DataRequired(), Email()], filters=[lambda x: x.strip().lower() if x else x])
-         phone_number = StringField('Phone Number', validators=[Optional(), Length(min=10, max=20)])
+         # *** ADD THIS LINE ***
+         phone_number = StringField('Phone Number', validators=[Optional(), Length(min=10, max=20)]) # Added Optional() validator
+         # *** END ADDITION ***
          password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
          confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password', message='Passwords must match.')])
+         # OTP and CAPTCHA fields are still omitted from the form class
          submit = SubmitField('Register Account')
 
     class ForgotPasswordForm(FlaskForm):
@@ -227,767 +413,886 @@ if WTFORMS_AVAILABLE:
         submit = SubmitField('Reset Password')
 
     class TransferForm(FlaskForm):
+        # Use StringField for SelectField value consistency, coerce in route if needed
         receiver_account_id = SelectField('Recipient Account', validators=[InputRequired(message="Please select a recipient.")])
-        amount = DecimalField('Amount', places=2, rounding=None, validators=[InputRequired(message="Amount is required."), NumberRange(min=0.01, message="Amount must be at least ₹0.01.")])
+        amount = DecimalField('Amount', places=2, rounding=None,
+                             validators=[InputRequired(message="Amount is required."),
+                                         NumberRange(min=0.01, message="Amount must be at least ₹0.01.")]) # Updated message
         simulate_eve = BooleanField('Simulate Eavesdropper (Higher QBER)')
         submit = SubmitField('Initiate Secure Transfer')
-else: # Fallback DummyForm definitions
-    logging.warning("Flask-WTF not found, forms defined as dummies.")
+
+else:
+    # Fallback if WTForms not available
+    logging.warning("Flask-WTF not found, forms defined as dummies. Using basic request.form checks.")
     class DummyForm:
-        def __init__(self, formdata=None, obj=None, prefix='', data=None, meta=None, **kwargs): self._formdata = formdata; self.errors = {}
-        def validate_on_submit(self): return request.method == 'POST'
-        def populate_obj(self, obj): pass
+        # Basic init to prevent errors on instantiation
+        def __init__(self, formdata=None, obj=None, prefix='', data=None, meta=None, **kwargs):
+            self._formdata = formdata # Store formdata if passed
+            self.errors = {} # Initialize errors dict
+
+        def validate_on_submit(self):
+             # Crude validation: just check if it's a POST request
+             return request.method == 'POST'
+
+        def populate_obj(self, obj): pass # No-op
+
         def __getattr__(self, name):
-             field_data = None; is_checkbox = name == 'simulate_eve'; form_source = self._formdata or (request.form if request else None)
-             if form_source: field_data = (name in form_source) if is_checkbox else form_source.get(name)
-             return type('DummyField', (object,), {'data': field_data, 'errors': []})()
-    LoginForm=RegistrationForm=ForgotPasswordForm=ResetPasswordForm=TransferForm=DummyForm
+             # Attempt to simulate field access
+             field_data = None
+             is_checkbox = name == 'simulate_eve' # Example specific checkbox handling
 
-# --- Database Helper Functions (Adapted for PostgreSQL) ---
+             if request and request.form:
+                 if is_checkbox:
+                     field_data = name in request.form # Checkbox presence
+                 elif name in request.form:
+                      field_data = request.form[name]
+             elif self._formdata: # Check formdata passed during init
+                 if is_checkbox:
+                     field_data = name in self._formdata
+                 elif name in self._formdata:
+                      field_data = self._formdata[name]
+
+             # Return a simple object that has a 'data' attribute
+             field_obj = type('DummyField', (object,), {'data': field_data, 'errors': []})()
+             return field_obj
+
+    LoginForm = DummyForm
+    RegistrationForm = DummyForm
+    ForgotPasswordForm = DummyForm
+    ResetPasswordForm = DummyForm
+    TransferForm = DummyForm
+# *** END FORMS DEFINITION ***
+
+# --- Database Helper Functions ---
 def get_db_connection():
-    """
-    Establishes and returns a database connection based on environment.
-    Prioritizes PostgreSQL using DATABASE_URL (for Render).
-    Falls back to MySQL using MYSQL_CONFIG (for local testing).
-    Returns the connection object or None on failure.
-    Callers are responsible for creating cursors from the returned connection.
-    """
+    """Establishes and returns a new database connection."""
     conn = None
-    db_url = os.environ.get('DATABASE_URL') # Render injects this automatically
-
-    # --- Primary Path: Use DATABASE_URL for PostgreSQL ---
-    if db_url:
-        if not POSTGRES_AVAILABLE:
-            logging.critical("FATAL: DATABASE_URL is set, but psycopg2 driver is not available!")
-            return None
-        try:
-            logging.debug("Attempting PostgreSQL connection using DATABASE_URL.")
-            # Connect without specifying cursor factory here; let caller decide.
-            conn = psycopg2.connect(db_url)
-            # Optional: Set autocommit if desired, or handle transactions explicitly
-            # conn.autocommit = True # Example, usually better to manage transactions
-            logging.info("PostgreSQL connection successful via DATABASE_URL.")
+    try:
+        conn = mysql.connector.connect(**MYSQL_CONFIG)
+        if conn.is_connected():
+            logging.debug("DB connection successful.")
             return conn
-        except psycopg2.Error as e_pg: # Catch specific psycopg2 errors
-            logging.critical(f"CRITICAL POSTGRESQL CONNECTION ERROR: {e_pg}")
+        else:
+            # Should not happen if connect() succeeded without error, but handle defensively
+            logging.error("DB connection failed: Connection established but not active.")
+            if conn: conn.close() # Close potentially broken connection
             return None
-        except Exception as e_pg_other:
-            logging.critical(f"CRITICAL UNEXPECTED ERROR CONNECTING TO POSTGRESQL: {e_pg_other}", exc_info=True)
-            return None
-
-    # --- Fallback Path: Use MySQL Config ---
-    else:
-        logging.debug("DATABASE_URL not found. Attempting fallback to MySQL config.")
-        if not MYSQL_AVAILABLE:
-            logging.critical("FATAL: Running without DATABASE_URL, but MySQL Connector driver is not available!")
-            return None
-        if not MYSQL_CONFIG.get('password'): # Basic check for password existence
-             logging.warning("MySQL password not found in config/environment. Connection likely to fail.")
-
-        try:
-            # Connect using the globally defined MYSQL_CONFIG dictionary
-            conn = mysql.connector.connect(**MYSQL_CONFIG)
-            # Check if connection is actually established and active
-            if conn.is_connected():
-                logging.info("DB connection successful (MySQL Fallback).")
-                return conn
-            else:
-                # Should ideally not happen if connect() didn't raise error, but handle defensively
-                logging.error("MySQL fallback connection failed: connect() succeeded but is_connected() is False.")
-                if conn: # Close potentially broken connection
-                    try: conn.close()
-                    except Exception: pass # Ignore close errors on failure path
-                return None
-        except MySQLError as e_mysql: # Catch specific mysql.connector errors
-            logging.critical(f"CRITICAL MYSQL FALLBACK CONNECTION ERROR: {e_mysql}")
-            # conn object might not be assigned if connect fails early
-            # No need to close here as connect likely failed
-            return None
-        except Exception as e_mysql_other:
-             logging.critical(f"CRITICAL UNEXPECTED MYSQL FALLBACK ERROR: {e_mysql_other}", exc_info=True)
-             return None
+    except MySQLError as e:
+        logging.critical(f"CRITICAL DATABASE CONNECTION ERROR: {e}")
+        if conn: # Ensure closure even if connection failed mid-process
+            try: conn.close()
+            except MySQLError: pass
+        return None
+    except Exception as e: # Catch other errors like config issues
+        logging.critical(f"CRITICAL UNEXPECTED ERROR CONNECTING TO DB: {e}")
+        if conn:
+            try: conn.close()
+            except MySQLError: pass
+        return None
 
 def close_db_connection(conn):
-    """
-    Safely closes the database connection if it exists and is open.
-    Handles both psycopg2 and mysql.connector connection objects.
-    """
-    # Check if conn object is valid and has a 'close' method
-    if not conn or not hasattr(conn, 'close'):
-        logging.debug("close_db_connection called with invalid/None connection object.")
-        return
-
-    try:
-        # Check if it's a psycopg2 connection and already closed
-        if hasattr(conn, 'closed') and conn.closed:
-             logging.debug("PostgreSQL connection already closed.")
-             return
-
-        # For MySQL, check is_connected() if available, though closing multiple times is often safe
-        # We rely on the fact that calling code should ideally not call close multiple times.
-
-        # Attempt to close the connection
-        logging.debug(f"Attempting to close DB connection (Type Check: PG={isinstance(conn, psycopg2.extensions.connection if POSTGRES_AVAILABLE else False)}, MySQL={isinstance(conn, mysql.connector.connection.MySQLConnection if MYSQL_AVAILABLE else False)})")
-        conn.close()
-        logging.info("Database connection closed successfully.")
-
-    # Use the globally defined DB_ERROR_TYPE for broad compatibility
-    # but also catch specific types if possible for more granular logging (optional)
-    except DB_ERROR_TYPE as e:
-        # Log based on the actual error type determined globally
-        logging.error(f"Error closing DB connection ({DB_ERROR_TYPE.__name__}): {e}")
-    except Exception as e_generic:
-        # Catch any other unexpected error during close
-        logging.error(f"Unexpected generic error closing DB connection: {e_generic}", exc_info=True)
+    """Closes the database connection if it's open."""
+    if conn and conn.is_connected():
+        try:
+            conn.close()
+            logging.debug("Database connection closed.")
+        except MySQLError as e:
+            logging.error(f"Error closing database connection: {e}")
+        except Exception as e:
+             logging.error(f"Unexpected error closing DB connection: {e}")
 
 def get_accounts_data(customer_id_filter=None):
-    """Fetches account data. Adapted for PG/MySQL. Returns list or None on DB error."""
-    accounts = []; conn = None; cursor = None; db_type = "Unknown"
+    """Fetches account data, optionally filtered by customer ID. Returns list or None on DB error."""
+    accounts = []
+    conn = None # Initialize connection variable
+    cursor = None # Initialize cursor variable
+    db_type = "Unknown" # To track which DB is being used
+
     try:
-        conn = get_db_connection()
-        if not conn: raise ConnectionError("DB connection failed in get_accounts_data.")
+        conn = get_db_connection() # Get connection first
+        if not conn:
+            # Raise an error or handle appropriately if connection failed
+            raise ConnectionError("Database connection failed in get_accounts_data.")
 
-        # Determine cursor type (prefer dict-like)
-        db_type = getattr(conn, 'driver_name', 'Unknown')
-        if db_type == 'psycopg2':
+        # --- Determine cursor type based on DB connection ---
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
             cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        elif db_type == 'mysql':
+            db_type = "PostgreSQL"
+        elif MYSQL_AVAILABLE and hasattr(conn, 'is_connected'): # Heuristic for MySQL conn
             cursor = conn.cursor(dictionary=True)
-        else: # Fallback (likely returns tuples)
-            cursor = conn.cursor()
-            logging.warning("get_accounts_data: Using fallback tuple cursor.")
+            db_type = "MySQL"
+        else:
+            cursor = conn.cursor() # Fallback basic cursor
+            db_type = "Fallback"
         logging.debug(f"get_accounts_data: Using {db_type} cursor.")
+        # --- End Cursor Type Determination ---
 
-        # SELECT includes account_number
+        # --- UPDATED SQL QUERY: Include account_number ---
         sql = """SELECT a.account_id, a.account_number, c.customer_name, a.balance, a.customer_id
-                 FROM accounts a JOIN customers c ON a.customer_id = c.customer_id"""
+                 FROM accounts a
+                 JOIN customers c ON a.customer_id = c.customer_id"""
+        # --- END SQL UPDATE ---
+
         params = []
         if customer_id_filter is not None:
             try:
                 filter_id = int(customer_id_filter)
                 sql += " WHERE a.customer_id = %s"
                 params.append(filter_id)
-            except (ValueError, TypeError): logging.error(f"Invalid filter type: {customer_id_filter}")
+            except (ValueError, TypeError):
+                 logging.error(f"Invalid customer_id_filter type: {customer_id_filter}. Ignoring.")
+
+        # Order consistently, e.g., by account_id which should be stable
         sql += " ORDER BY a.account_id ASC"
         cursor.execute(sql, tuple(params))
-        raw_accounts_results = cursor.fetchall()
+        raw_accounts_results = cursor.fetchall() # Fetches list of RealDictRow or dict
 
         for acc_row_raw in raw_accounts_results:
-            # Process row into a standard dictionary
-            acc_data = {}
-            is_dict_like = False
-            try:
-                if isinstance(acc_row_raw, (dict, psycopg2.extras.RealDictRow if POSTGRES_AVAILABLE else dict)):
-                    is_dict_like = True
-                    acc_data['account_id'] = acc_row_raw.get('account_id')
-                    acc_data['account_number'] = acc_row_raw.get('account_number') # Might be None
-                    acc_data['customer_name'] = acc_row_raw.get('customer_name')
-                    acc_data['customer_id'] = acc_row_raw.get('customer_id')
-                    balance_val = acc_row_raw.get('balance')
-                elif isinstance(acc_row_raw, (tuple, list)) and len(acc_row_raw) >= 5:
-                     # Indices based on SELECT: id, number, name, balance, cust_id
-                     acc_data['account_id'] = acc_row_raw[0]
-                     acc_data['account_number'] = acc_row_raw[1] # Might be None
-                     acc_data['customer_name'] = acc_row_raw[2]
-                     balance_val = acc_row_raw[3]
-                     acc_data['customer_id'] = acc_row_raw[4]
-                     if not is_dict_like: logging.debug("Processing account data using tuple access.") # Log only once if fallback used
-                else:
-                    logging.warning(f"Skipping account row due to unexpected type/structure: {type(acc_row_raw)}")
-                    continue
-
-                # Convert balance
+            # Convert row to standard dict for consistent processing
+            acc_row = dict(acc_row_raw)
+            balance_val = None # Initialize for logging in except block
+            try: # Inner try for processing each account row
+                balance_val = acc_row.get('balance')
+                # Convert balance via string for robustness
                 current_balance = Decimal(str(balance_val)) if balance_val is not None else Decimal('0.00')
-                acc_data['balance'] = current_balance
 
-                # --- MODIFIED CHECK ---
-                # Check only for essential keys needed for display/linking, allow account_number to be None
-                essential_keys = ('account_id', 'customer_name', 'customer_id', 'balance')
-                if all(k in acc_data and acc_data[k] is not None for k in essential_keys):
-                    # Add account_number even if None (template handles None with default filter)
-                    if 'account_number' not in acc_data: # Ensure key exists if tuple processing missed it somehow
-                         acc_data['account_number'] = None
-                    accounts.append(acc_data) # Append the processed dict
+                # --- UPDATED CHECK: Include 'account_number' ---
+                required_keys = ('account_id', 'account_number', 'customer_name', 'customer_id', 'balance')
+                # We check balance key here too, though we process it separately
+                if all(k in acc_row for k in required_keys):
+                # --- END CHECK UPDATE ---
+                    acc_row['balance'] = current_balance # Update balance in dict
+                    accounts.append(acc_row) # Append the processed dict
                 else:
-                    missing_essential = [k for k in essential_keys if k not in acc_data or acc_data[k] is None]
-                    logging.warning(f"Skipping account row missing essential keys ({missing_essential}): ID {acc_data.get('account_id')}")
-                # --- END MODIFIED CHECK ---
+                    missing_keys = [k for k in required_keys if k not in acc_row]
+                    logging.warning(f"Skipping account row missing required keys ({missing_keys}): {acc_row.get('account_id', 'N/A')}")
 
-            except (InvalidOperation, TypeError, ValueError) as e:
-                logging.warning(f"Acc {acc_data.get('account_id', '?')}: Invalid balance ('{balance_val}'): {e}")
+            except (InvalidOperation, TypeError, ValueError) as e: # Added ValueError
+                logging.warning(f"Skipping account {acc_row.get('account_id', 'N/A')} due to invalid balance ('{balance_val}'): {e}")
             except Exception as inner_e:
-                logging.error(f"Acc {acc_data.get('account_id', '?')}: Error processing row: {inner_e}", exc_info=True)
+                 logging.error(f"Unexpected error processing account row {acc_row.get('account_id', 'N/A')}: {inner_e}", exc_info=True)
 
-    except DB_ERROR_TYPE as e: logging.error(f"DB error fetch accounts ({db_type}): {e}"); return None
-    except ConnectionError as e: logging.error(f"Conn error fetch accounts: {e}"); return None
-    except Exception as e: logging.error(f"Unexpected error fetch accounts: {e}", exc_info=True); return None
+    # --- UPDATED EXCEPTION HANDLING ---
+    except DB_ERROR_TYPE as e: # Use the globally defined DB_ERROR_TYPE
+        logging.error(f"Database error fetching accounts data using {db_type}: {e}", exc_info=True)
+        # Flash error in the route that calls this function if needed
+        return None # Indicate DB error
+    except ConnectionError as e:
+        # Logged when getting connection, just return None here
+        logging.error(f"get_accounts_data: Connection error encountered: {e}")
+        return None
+    except Exception as e:
+        logging.error(f"Unexpected error in get_accounts_data: {e}", exc_info=True)
+        return None # Indicate unexpected error
+    # --- END UPDATED EXCEPTION HANDLING ---
     finally:
+        # Ensure cleanup in finally block
         if cursor:
             try: cursor.close()
-            except: pass # Ignore close errors
-        if conn: close_db_connection(conn)
+            except DB_ERROR_TYPE: pass # Ignore specific DB close errors
+            except Exception: pass # Ignore generic close errors
+        if conn:
+            # Close connection obtained by this function
+            close_db_connection(conn)
+            
     return accounts
 
 def get_user_by_email(email):
-    """Fetches user details by email. Adapted for PG/MySQL. Returns dict or None."""
-    user = None; conn = None; cursor = None; db_type = "Unknown"
-    if not isinstance(email, str) or not email: return None
+    """Fetches user details by email. Returns dict or None."""
+    conn = get_db_connection()
+    cursor = None
+    user = None
+    if not conn: return None # DB connection failed
+    if not isinstance(email, str) or not email: return None # Basic validation
 
     try:
-        conn = get_db_connection()
-        if not conn: raise ConnectionError("DB connection failed in get_user_by_email.")
-        db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type
-
-        # Use dictionary-like cursor for easier access
-        if db_type == 'psycopg2':
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        elif db_type == 'mysql':
-            cursor = conn.cursor(dictionary=True)
-        else: # Fallback
-            cursor = conn.cursor() # May return tuples
-        logging.debug(f"get_user_by_email: Using {db_type} cursor.")
-
+        cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT customer_id, customer_name, email, password_hash FROM customers WHERE email = %s", (email,))
-        user_row = cursor.fetchone() # Fetches RealDictRow, dict, or tuple
-
-        # --- SAFER CONVERSION ---
-        if user_row:
-            # Check if it's already a dictionary-like object (mapping)
-            if hasattr(user_row, 'keys'): # Covers dict and RealDictRow
-                 user = dict(user_row)
-            elif isinstance(user_row, (tuple, list)) and len(user_row) >= 4: # Handle tuple case
-                 # Manually create dict if it's a tuple/list
-                 user = {
-                     'customer_id': user_row[0],
-                     'customer_name': user_row[1],
-                     'email': user_row[2],
-                     'password_hash': user_row[3]
-                 }
-            else:
-                 logging.error(f"Fetched user_row for {email} is in unexpected format: {type(user_row)}")
-                 user = None # Couldn't convert
-        # --- END SAFER CONVERSION ---
-
-    except DB_ERROR_TYPE as e: logging.error(f"DB Error fetch user {email} ({db_type}): {e}"); user = None
-    except ConnectionError as e: logging.error(f"Conn error fetch user {email}: {e}"); user = None
-    except Exception as e: logging.error(f"Unexpected error fetch user {email}: {e}", exc_info=True); user = None
+        user = cursor.fetchone()
+    except MySQLError as e:
+        logging.error(f"DB Error fetching user by email ({email}): {e}")
+        user = None # Ensure None on error
+    except Exception as e:
+        logging.error(f"Unexpected error fetching user by email ({email}): {e}", exc_info=True)
+        user = None
     finally:
         if cursor:
             try: cursor.close()
-            except: pass # Ignore close errors
-        if conn: close_db_connection(conn)
+            except MySQLError: pass
+        close_db_connection(conn)
     return user
-  
+
 def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value=None, fraud_reason=None, exception_info=None):
-    """Logs details of a failed transaction attempt. Adapted for PG/MySQL."""
+    """Logs details of a failed transaction attempt."""
     sender_id_val = int(sender_id) if sender_id is not None else None
     receiver_id_val = int(receiver_id) if receiver_id is not None else None
-
-    # Robust amount handling
-    if amount is None or not isinstance(amount, Decimal):
-        try:
-            amount = Decimal(str(amount).strip()) if amount is not None else Decimal('0.00')
-        except (InvalidOperation, TypeError, ValueError):
-            logging.warning(f"Invalid amount '{amount}' passed to log_failed_attempt, using 0.00.")
-            amount = Decimal('0.00')
-    amount_str = f"{amount:.2f}" # Format Decimal to string
-
+    amount_str = str(amount) if isinstance(amount, Decimal) else (str(amount) if amount is not None else None)
     qber_db_val = float(qber_value) if isinstance(qber_value, (float, int)) and qber_value >= 0 else None
-    is_flagged = bool(fraud_reason) # Flag if any reason exists
-    reason_text = str(fraud_reason)[:255] if fraud_reason else None # Truncate
+    is_flagged = bool(fraud_reason)
+    reason_text = str(fraud_reason)[:255] if fraud_reason else None # Truncate reason
+    if exception_info: # Append exception info if available
+         reason_text = f"{reason_text or 'Error'} | Exception: {str(exception_info)[:150]}" # Truncate long exceptions
 
-    # Combine exception info safely
-    if exception_info:
-        exc_str = str(exception_info)[:150] # Limit exception string length
-        reason_text = f"{reason_text or 'Error'} | Exc: {exc_str}"[:255] # Combine and truncate
-
-    logging.warning(f"Logging failed TXN: Status='{failed_status}', Reason='{reason_text}'")
+    logging.warning(f"Logging failed transaction attempt: Status='{failed_status}', Reason='{reason_text}'")
 
     log_conn = None; log_cursor = None
     try:
         log_conn = get_db_connection()
         if not log_conn:
-            logging.critical("CRITICAL: DB Conn failed. CANNOT LOG FAILED TXN.")
-            return # Exit if cannot log
+            logging.critical("CRITICAL: DB Connection failed. UNABLE TO LOG FAILED TRANSACTION.")
+            return
 
-        log_cursor = log_conn.cursor() # Standard cursor for INSERT
-        # SQL INSERT statement (placeholders work for both DBs)
-        log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, qber_value, is_flagged, fraud_reason, timestamp, encrypted_confirmation, iv) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+        log_cursor = log_conn.cursor()
+        # Ensure SQL matches the table structure (including timestamp etc.)
+        log_sql = """INSERT INTO qkd_transaction_log
+                     (sender_account_id, receiver_account_id, amount, qkd_status,
+                      qber_value, is_flagged, fraud_reason, timestamp, encrypted_confirmation, iv)
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         log_values = (
-            sender_id_val, receiver_id_val, amount_str,
-            failed_status[:50], # Ensure status fits DB column size
-            qber_db_val, is_flagged, reason_text, # Use potentially combined/truncated reason
-            datetime.datetime.now(datetime.timezone.utc), # Use timezone-aware timestamp
+            sender_id_val, receiver_id_val, amount_str, failed_status[:50], # Truncate status
+            qber_db_val, is_flagged, reason_text,
+            datetime.datetime.now(), # Timestamp of the failure logging
             None, None # No encrypted data/IV for failed attempts
         )
         log_cursor.execute(log_sql, log_values)
-        log_conn.commit() # Commit the log entry
-        logging.info(f"Failed attempt logged (Status: {failed_status}).")
+        log_conn.commit()
+        logging.info(f"Failed attempt logged successfully (Status: {failed_status}).")
 
-    except DB_ERROR_TYPE as log_err: # Use global DB_ERROR_TYPE
-        logging.critical(f"CRITICAL DBError log FAILED TXN: {log_err}", exc_info=True)
-        # Attempt rollback if connection is still valid
-        if log_conn and not getattr(log_conn, 'closed', True):
-            try:
-                log_conn.rollback()
-                logging.warning("Attempted rollback after failed transaction logging.")
-            except DB_ERROR_TYPE as rb_err: logging.error(f"Rollback failed: {rb_err}")
-            except Exception as rb_gen_err: logging.error(f"Unexpected rollback error: {rb_gen_err}")
+    except MySQLError as log_err:
+        logging.critical(f"CRITICAL: Failed to log FAILED TRANSACTION (Status: {failed_status}): {log_err}", exc_info=True)
+        if log_conn and log_conn.is_connected():
+            try: log_conn.rollback()
+            except MySQLError: pass
     except Exception as e:
-         logging.critical(f"CRITICAL Unexpected error log FAILED TXN: {e}", exc_info=True)
-         # Attempt rollback
-         if log_conn and not getattr(log_conn, 'closed', True):
-             try:
-                 log_conn.rollback()
-             except Exception as rb_gen_err: logging.error(f"Unexpected rollback error on generic exception: {rb_gen_err}")
+         logging.critical(f"CRITICAL: Unexpected error logging failed TXN: {e}", exc_info=True)
+         if log_conn and log_conn.is_connected():
+             try: log_conn.rollback()
+             except MySQLError: pass
     finally:
-        # Safe cleanup
         if log_cursor:
             try: log_cursor.close()
-            except DB_ERROR_TYPE: pass
-            except Exception: pass
-        if log_conn: close_db_connection(log_conn)
-    # --- End Correction ---
+            except MySQLError: pass
+        close_db_connection(log_conn)
 
 # --- Authentication & Session Management ---
 def login_required(f):
+    """Decorator to ensure user is logged in and session is valid."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Check session first
         if 'user_id' not in session:
-            flash("Please log in.", "warning")
+            flash("Please log in to access this page.", "warning")
             return redirect(url_for('login', next=request.url))
-        # Check g.user *and* if it has 'id' key BEFORE proceeding
-        if not g.get('user') or 'id' not in g.user: # More explicit check
+        if not g.get('user'):
+             # If user_id exists but g.user not loaded, session is likely invalid
              session.clear()
-             flash("Session invalid or incomplete. Please log in again.", "warning")
-             logging.warning(f"Cleared session in decorator: g.user check failed (g.user: {g.get('user')})")
+             flash("Your session has expired or is invalid. Please log in again.", "warning")
+             logging.warning("Cleared session: user_id found but g.user not loaded.")
              return redirect(url_for('login'))
-        # If checks pass
-        logging.debug(f"Login required check passed for user: {g.user.get('id')}")
+        # User is logged in and g.user is loaded
         return f(*args, **kwargs)
     return decorated_function
 
-@app.before_request
-def load_logged_in_user():
-    """Loads user data into Flask's 'g' object. Handles PG/MySQL."""
-    user_id = session.get('user_id')
-    g.user = None # Reset at start
-    logging.debug(f"[BeforeRequest] Start. Session user_id: {user_id}")
-    if user_id:
-        conn = None; cursor = None; db_type = "Unknown"
-        try:
-            conn = get_db_connection()
-            if conn:
-                try:
-                    # Use standard cursor for this simple fetch by primary key
-                    cursor = conn.cursor()
-                    db_type = getattr(conn, 'driver_name', 'Unknown') # Get type if set
-                    logging.debug(f"[BeforeRequest] DB Connected ({db_type}). Querying user_id: {user_id}")
-                    sql = "SELECT customer_id, customer_name, email FROM customers WHERE customer_id = %s"
-                    cursor.execute(sql, (user_id,))
-                    user_data_tuple = cursor.fetchone() # Fetches a tuple
-                    logging.debug(f"[BeforeRequest] DB Fetch Result: {user_data_tuple}")
-
-                    # Check tuple validity before accessing indices
-                    if user_data_tuple and len(user_data_tuple) >= 3:
-                        # Assign to g.user as a dictionary
-                        g.user = {'id': user_data_tuple[0], 'name': user_data_tuple[1], 'email': user_data_tuple[2]}
-                        session.permanent = True # Refresh session lifetime
-                        logging.info(f"[BeforeRequest] Set g.user for {user_id}: {g.user}")
-                    else:
-                        # User ID in session but not found or data invalid in DB
-                        logging.warning(f"[BeforeRequest] User {user_id} in session not found/invalid in DB ({user_data_tuple}). Clearing.")
-                        session.clear(); g.user = None # Clear session and ensure g.user is None
-                except DB_ERROR_TYPE as e: # Catch DB-specific error
-                    logging.error(f"[BeforeRequest] DBError load session user {user_id} ({db_type}): {e}"); g.user = None
-                except IndexError as e: # Catch error if tuple doesn't have expected elements
-                     logging.error(f"[BeforeRequest] IndexError user {user_id} processing tuple {user_data_tuple}: {e}"); g.user = None
-                except Exception as e: # Catch any other errors during DB interaction
-                    logging.error(f"[BeforeRequest] Unexpected error load user {user_id}: {e}", exc_info=True); g.user = None
-                finally:
-                    # Safe cleanup for this block's cursor and connection
-                    if cursor:
-                        try: cursor.close()
-                        except DB_ERROR_TYPE: pass
-                        except Exception: pass
-                    if conn: # Close the connection specifically obtained for this request check
-                         close_db_connection(conn)
-            else:
-                # Failed to get DB connection
-                logging.error("[BeforeRequest] DB conn failed. Clearing session."); session.clear(); g.user = None
-        except Exception as outer_e:
-             # Error even trying to get connection
-             logging.error(f"[BeforeRequest] Outer exception {user_id}: {outer_e}", exc_info=True); session.clear(); g.user = None
-    else: # No user_id in session
-        logging.debug("[BeforeRequest] No user_id in session.")
-    # Log final state for debugging request flow
-    logging.debug(f"[BeforeRequest] End. g.user is set: {bool(g.user)}")
-
 def clear_qkd_session_log():
      """Removes the last QKD simulation log from the user's session."""
-     # Safely get user_id from g.user first, fallback to session
-     user_id = getattr(g, 'user', {}).get('id') or session.get('user_id')
+     user_id = getattr(g, 'user', {}).get('id')
+     if not user_id and 'user_id' in session: user_id = session['user_id'] # Fallback
      if user_id:
          log_key = f'last_qkd_log_{user_id}'
-         # Use pop with default None to avoid KeyError if key doesn't exist
-         if session.pop(log_key, None) is not None:
+         if log_key in session:
+             session.pop(log_key)
              session.modified = True # Ensure session changes are saved
              logging.info(f"Cleared QKD log from session for user {user_id}")
-         # else: # Optional log if needed
-         #     logging.debug(f"No QKD log found in session for user {user_id} to clear.")
-     # else: # Optional log if needed
-     #     logging.warning("Could not determine user ID to clear QKD session log.")
-
 
 # --- Async Email Helper ---
 def send_async_email(app_context, msg):
     """Sends email in a background thread using app context."""
-    # Pass the whole app context for Flask-Mail and config access
-    with app_context:
+    with app_context: # Use provided app context
         if not mail:
-            logging.error("Flask-Mail (mail object) not initialized. Cannot send async email.")
+            logging.error("Mail object not initialized. Cannot send async email.")
             return
         try:
-            logging.debug(f"Attempting to send async email via Flask-Mail to: {msg.recipients}")
             mail.send(msg)
-            # Log success AFTER send attempt returns without error
-            logging.info(f"Async email sent successfully via Flask-Mail to {msg.recipients}")
+            logging.info(f"Async email sent successfully to {msg.recipients}")
         except Exception as e:
-            # Log the full error details for debugging SMTP issues
-            logging.error(f"Error sending async email via Flask-Mail to {msg.recipients}: {e}", exc_info=True)
+            logging.error(f"Error sending async email to {msg.recipients}: {e}", exc_info=True)
+
+@login_manager.user_loader
+def load_user(user_id):
+    """
+    Callback used by Flask-Login to reload the user object from the user ID stored in the session.
+    Fetches user details from the database and returns a User object or None.
+    """
+    logging.debug(f"Flask-Login attempting to load user ID: {user_id}")
+    if user_id is None:
+        return None
+
+    conn = None
+    cursor = None
+    # Determine the primary DB error type to catch based on availability
+    db_error_type_pg = psycopg2.Error if POSTGRESQL_AVAILABLE and psycopg2 else None
+    db_error_type_mysql = MySQLError if MYSQL_AVAILABLE and MySQLError else None
+    available_db_errors = tuple(filter(None, [db_error_type_pg, db_error_type_mysql]))
+    if not available_db_errors: available_db_errors = (Exception,) # Fallback
+
+    try:
+        # Convert user_id back to integer if needed (Flask-Login stores it as string)
+        try:
+            user_id_int = int(user_id)
+        except ValueError:
+            logging.warning(f"Invalid non-integer user ID '{user_id}' passed to user_loader.")
+            return None
+
+        conn = get_db_connection() # Assumes this function exists and works
+        if not conn:
+            logging.error(f"DB connection failed in user_loader for user ID {user_id_int}.")
+            return None # Cannot load user without DB connection
+
+        # Create cursor based on connection type
+        if POSTGRESQL_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+             cursor = conn.cursor(dictionary=True)
+        else:
+             logging.error(f"Cannot determine cursor type for user_loader user ID {user_id_int}.")
+             return None
+
+        # Fetch essential user details
+        cursor.execute("""
+            SELECT customer_id, customer_name, email
+            FROM customers
+            WHERE customer_id = %s
+        """, (user_id_int,))
+        user_data_raw = cursor.fetchone()
+
+        if user_data_raw:
+            # Check if essential data is present
+            cust_id = user_data_raw.get('customer_id')
+            cust_name = user_data_raw.get('customer_name')
+            cust_email = user_data_raw.get('email')
+
+            if cust_id is not None and cust_name is not None and cust_email is not None:
+                 # Instantiate and return the User object
+                 user_object = User(id=cust_id, name=cust_name, email=cust_email)
+                 logging.debug(f"User object created for user ID {user_id_int}")
+                 return user_object
+            else:
+                 logging.warning(f"Incomplete data found in DB for user ID {user_id_int}. Cannot create user object.")
+                 return None
+        else:
+            # User ID not found in the database
+            logging.debug(f"User ID {user_id_int} not found in database during user_loader lookup.")
+            return None
+
+    except available_db_errors as db_err:
+        error_type_name = type(db_err).__name__
+        logging.error(f"{error_type_name} occurred in user_loader for user ID {user_id}: {db_err}")
+        return None # Don't return a user object if there's a DB error
+
+    except Exception as e:
+        logging.error(f"Unexpected error in user_loader for user ID {user_id}: {e}", exc_info=True)
+        return None # Safety net
+
+    finally:
+        # Ensure resources are closed
+        if cursor:
+            try: cursor.close()
+            except Exception: pass
+        if conn:
+            close_db_connection(conn) # Assumes this function exists and works
+            logging.debug(f"DB connection closed in user_loader for user ID {user_id}.")
+
+@app.before_request
+def load_logged_in_user():
+    """
+    Runs before each request. If a 'user_id' is found in the session,
+    this function attempts to load the corresponding user's details
+    (ID, name, email) from the database into the Flask 'g' object (g.user).
+
+    Handles database connection errors, invalid sessions (user ID not found
+    in DB), and ensures database resources are properly closed.
+    Prioritizes PostgreSQL for cursor/error handling if available.
+    """
+    user_id = session.get('user_id')
+    g.user = None  # Initialize g.user to None for every request by default
+
+    if user_id:
+        # Proceed only if a user_id was found in the session
+        conn = None
+        cursor = None
+
+        # Determine the specific DB error classes to catch based on availability
+        # Directly use the correctly named global flags now
+        db_error_type_pg = psycopg2.Error if POSTGRES_AVAILABLE and psycopg2 else None
+        db_error_type_mysql = MySQLError if MYSQL_AVAILABLE and MySQLError else None
+        # Create a tuple of available database error types to catch
+        available_db_errors = tuple(filter(None, [db_error_type_pg, db_error_type_mysql]))
+        if not available_db_errors:
+            # Fallback to generic Exception if no specific driver/error available
+            available_db_errors = (Exception,)
+            # Log only if needed, as it should ideally find one or the other if configured
+            # logging.warning("No specific DB error type (psycopg2.Error/MySQLError) available for @before_request.")
+
+        try:
+            # 1. Attempt to establish a database connection.
+            conn = get_db_connection() # Assumes this function handles PG/MySQL switching
+
+            if not conn:
+                logging.error(f"DB connection failed in @before_request while attempting to load user {user_id}.")
+                return # Exit function early
+
+            # 2. Create a database cursor appropriate for the connection type.
+            # Directly use the correctly named global flags
+            if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+                 cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                 logging.debug("Using psycopg2 DictCursor for user load.")
+            elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+                 cursor = conn.cursor(dictionary=True)
+                 logging.debug("Using mysql.connector dictionary cursor for user load.")
+            else:
+                 # This indicates an issue with the connection object or availability flags.
+                 logging.error(f"Cannot determine appropriate cursor type for DB connection while loading user {user_id}.")
+                 if conn: close_db_connection(conn) # Close connection if opened
+                 return # Exit function early
+
+            # 3. Execute the query to fetch user details.
+            logging.debug(f"Executing query to load user details for ID: {user_id}")
+            cursor.execute("""
+                SELECT customer_id, customer_name, email
+                FROM customers
+                WHERE customer_id = %s
+            """, (user_id,)) # Pass user_id as a tuple
+            user_data_raw = cursor.fetchone()
+
+            # 4. Process the query result.
+            if user_data_raw:
+                fetched_id = user_data_raw.get('customer_id')
+                fetched_name = user_data_raw.get('customer_name')
+                fetched_email = user_data_raw.get('email')
+
+                if fetched_id is not None and fetched_name is not None and fetched_email is not None:
+                    g.user = {'id': fetched_id, 'name': fetched_name, 'email': fetched_email}
+                    logging.debug(f"User {g.user['id']} ('{g.user['name']}') loaded into g object.")
+                    session.permanent = True
+                else:
+                    logging.error(f"Incomplete data retrieved from DB for user ID {user_id}. Fetched: {user_data_raw}. Clearing session.")
+                    session.clear()
+                    g.user = None
+            else:
+                logging.warning(f"User ID {user_id} from session was not found in the database. Clearing invalid session.")
+                session.clear()
+                g.user = None
+
+        except available_db_errors as db_err:
+            error_type_name = type(db_err).__name__
+            logging.error(f"{error_type_name} occurred in @before_request loading user {user_id}: {db_err}", exc_info=False)
+            # g.user remains None
+
+        except Exception as e:
+            logging.error(f"Unexpected error in @before_request loading user {user_id}: {e}", exc_info=True)
+            # g.user remains None
+
+        finally:
+            # 5. Ensure database resources are closed.
+            if cursor:
+                try: cursor.close()
+                except Exception as cur_close_err: logging.warning(f"Ignoring error while closing cursor for user {user_id}: {cur_close_err}")
+            if conn:
+                try: close_db_connection(conn)
+                except Exception as conn_close_err: logging.error(f"Error closing DB connection for user {user_id} in @before_request: {conn_close_err}", exc_info=True)
 
 # --- Flask Routes ---
 @app.route('/')
 def home_redirect():
-    if g.get('user'): return redirect(url_for('index'))
+    """Redirects to login or index based on login status."""
+    if g.get('user'):
+        return redirect(url_for('index'))
     return redirect(url_for('login'))
 
 @app.route('/index')
 @login_required
 def index():
     """Main dashboard page."""
-    # --- MODIFIED USER ID FETCH ---
-    # Safely get user ID from g.user, default to None if key missing (though decorator should prevent None g.user)
-    user_id = g.user.get('id')
-    if user_id is None:
-         # This should ideally not happen if @login_required worked, but handle defensively
-         logging.error("CRITICAL: User ID missing from g.user in /index despite login_required.")
-         flash("An error occurred retrieving your user information. Please log in again.", "error")
-         session.clear() # Clear potentially corrupted session
-         return redirect(url_for('login'))
+    user_id = g.user['id']
     user_accounts = get_accounts_data(customer_id_filter=user_id)
-    all_accounts = get_accounts_data()
-    if user_accounts is None: user_accounts = []; flash("Error loading account info.", "error")
-    if all_accounts is None: all_accounts = []; flash("Error loading recipient list.", "error")
+    all_accounts = get_accounts_data() # For recipient list
+
+    if user_accounts is None: # DB error occurred
+        user_accounts = []
+        flash("Error loading your account information.", "error")
+    if all_accounts is None:
+        all_accounts = []
+        flash("Error loading recipient list. Transfers may be disabled.", "error")
+
     receiver_accounts = [acc for acc in all_accounts if acc.get('customer_id') != user_id]
     flagged_transactions = get_flagged_transactions(user_id, limit=5)
     show_fraud_alert = bool(flagged_transactions)
     last_transfer_outcome = session.pop('last_transfer_outcome', None)
+
+    # Prepare TransferForm (only if WTForms available)
     transfer_form = None
     if WTFORMS_AVAILABLE:
         transfer_form = TransferForm()
+        # Populate choices dynamically - ensure account_id is string for value
         recipient_choices = [(str(acc['account_id']), f"{acc['customer_name']} (Acc ID: {acc['account_id']})") for acc in receiver_accounts]
         recipient_choices.insert(0, ('', '-- Select Recipient --'))
         transfer_form.receiver_account_id.choices = recipient_choices
-    return render_template('index.html', user_accounts=user_accounts, receiver_accounts=receiver_accounts,
-                           transfer_form=transfer_form, show_fraud_alert=show_fraud_alert,
-                           flagged_transactions=flagged_transactions, last_transfer_outcome=last_transfer_outcome)
+
+    return render_template('index.html',
+                           user_accounts=user_accounts,
+                           receiver_accounts=receiver_accounts, # Pass raw list as well
+                           transfer_form=transfer_form, # Pass form object (or None)
+                           show_fraud_alert=show_fraud_alert,
+                           flagged_transactions=flagged_transactions, # Pass for potential display
+                           last_transfer_outcome=last_transfer_outcome)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register_customer():
-    """Handles new customer registration. Adapted for PG/MySQL with robust ID retrieval."""
-    if g.user: return redirect(url_for('index'))
-    form = RegistrationForm() if WTFORMS_AVAILABLE else None
+    """Handles new customer registration."""
+    if g.user: return redirect(url_for('index')) # Redirect if already logged in
+    form = RegistrationForm() if WTFORMS_AVAILABLE else None # Instantiate form if WTForms available
 
-    if (WTFORMS_AVAILABLE and form.validate_on_submit()) or (not WTFORMS_AVAILABLE and request.method == 'POST'):
+    # --- Handle POST Request ---
+    if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
+       (not WTFORMS_AVAILABLE and request.method == 'POST'):
+
         # --- 1. Extract Form Data ---
         if WTFORMS_AVAILABLE:
-            customer_name=form.customer_name.data; email=form.email.data; password=form.password.data; phone_number=form.phone_number.data
-        else: # Manual extraction and basic validation
-            customer_name=request.form.get('customer_name','').strip(); email=request.form.get('email','').strip().lower(); password=request.form.get('password',''); confirm_password=request.form.get('confirm_password',''); phone_number=request.form.get('phone_number', '').strip()
-            errors=[]
-            if not customer_name or len(customer_name)<2: errors.append("Name required (min 2 chars).")
-            if not email or '@' not in email: errors.append("Valid email required.")
-            if not password or len(password)<8: errors.append("Password required (min 8 chars).")
-            if password != confirm_password: errors.append("Passwords don't match.")
+            customer_name = form.customer_name.data
+            email = form.email.data
+            password = form.password.data
+            phone_number = form.phone_number.data
+        else:
+            # Manual extraction from request.form
+            customer_name = request.form.get('customer_name','').strip()
+            email = request.form.get('email','').strip().lower()
+            password = request.form.get('password','')
+            confirm_password = request.form.get('confirm_password','')
+            phone_number = request.form.get('phone_number', '').strip()
+
+            # Basic Manual Validation
+            errors = []
+            if not customer_name or len(customer_name) < 2: errors.append("Full Name must be at least 2 characters.")
+            if not email or '@' not in email: errors.append("Please enter a valid email address.")
+            if not password or len(password) < 8: errors.append("Password must be at least 8 characters long.")
+            if password != confirm_password: errors.append("Passwords do not match.")
+
             if errors:
                 for err in errors: flash(err, 'error')
                 return render_template('register.html', form=form)
 
+        # --- 2. Placeholder Validations (OTP/CAPTCHA) ---
         logging.info("DEMO MODE: Skipping CAPTCHA validation.")
         logging.info("DEMO MODE: Skipping OTP validation.")
 
         # --- 3. Database Operations ---
-        conn = None; cursor = None; user_exists = False; error_occurred = False; db_type = "Unknown"
+        conn = None; cursor = None; user_exists = False; error_occurred = False
 
-        # 3a. Pre-check email
+        # 3a. Pre-check if email exists
         try:
-             conn = get_db_connection();
-             if not conn: raise ConnectionError("DB pre-check connection error.")
-             db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type early
-             cursor = conn.cursor() # Simple cursor for existence check
-             logging.debug(f"Register Pre-check: Using {db_type} cursor.")
-             cursor.execute("SELECT 1 FROM customers WHERE email = %s LIMIT 1", (email,))
-             if cursor.fetchone():
+             conn = get_db_connection()
+             if not conn:
+                 flash("Database connection error during pre-check.", "error")
+                 return render_template('register.html', form=form)
+
+             # Determine cursor type for pre-check (can be simpler if only checking existence)
+             if POSTGRES_AVAILABLE and 'DATABASE_URL' in os.environ:
+                 pre_check_cursor = conn.cursor() # Simple cursor often fine for existence check
+             else:
+                 pre_check_cursor = conn.cursor() # MySQL simple cursor
+
+             pre_check_cursor.execute("SELECT 1 FROM customers WHERE email = %s LIMIT 1", (email,))
+             if pre_check_cursor.fetchone():
                  user_exists = True
-                 if WTFORMS_AVAILABLE and hasattr(form.email, 'errors'): form.email.errors.append("Email already registered.")
-                 else: flash("Email already registered.", "error")
-        except (DB_ERROR_TYPE, ConnectionError) as e:
-            logging.error(f"DB pre-check error ({db_type}) for {email}: {e}")
+                 if WTFORMS_AVAILABLE and hasattr(form.email, 'errors'):
+                      form.email.errors.append("Email address is already registered.")
+                 else:
+                      flash("Email address is already registered.", "error")
+             pre_check_cursor.close() # Close the specific cursor used for pre-check
+
+        except DB_ERROR_TYPE as e: # Use the globally defined DB_ERROR_TYPE
+            logging.error(f"Database error during registration pre-check for {email}: {e}")
             flash("A database error occurred during pre-check.", "error")
             error_occurred = True
         except Exception as e:
-            logging.error(f"Unexpected pre-check error for {email}: {e}", exc_info=True)
-            flash("An unexpected error occurred during pre-check.", "error")
-            error_occurred = True
+             logging.error(f"Unexpected error during registration pre-check: {e}", exc_info=True)
+             flash("An unexpected error occurred during pre-check.", "error")
+             error_occurred = True
         finally:
-             # Always close the cursor used for the pre-check if it exists
-             if cursor:
-                 try: cursor.close()
-                 except DB_ERROR_TYPE: pass # Ignore DB specific close errors
-                 except Exception as cur_close_err: logging.warning(f"Error closing pre-check cursor: {cur_close_err}")
-             # Close the connection ONLY if we are stopping
-             if (user_exists or error_occurred) and conn and not getattr(conn, 'closed', True):
-                 logging.debug("Closing connection after failed pre-check or existing user.")
+             # Close connection ONLY if checks failed or error occurred before main transaction
+             if (user_exists or error_occurred) and conn and conn.is_connected():
                  close_db_connection(conn)
-             elif conn:
-                 logging.debug("Pre-check passed. Keeping connection open.")
 
-        # --- Decision Point ---
+        # If email exists or error occurred, stop and re-render
         if user_exists or error_occurred:
-            # Ensure connection closed if stopping here
-            if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
+            # Ensure connection is closed if we didn't proceed
+            if conn and conn.is_connected(): close_db_connection(conn)
             return render_template('register.html', form=form)
 
-        # --- 3b. Main Transaction: Insert Customer & Account ---
-        # Conn should be open if pre-check passed
+        # -------------------------------------------------------------
+        # --- START: Main Transaction Block (Insert Customer & Account) ---
+        # Connection should still be open from the pre-check phase if successful
+        # -------------------------------------------------------------
         cursor = None; needs_rollback = False; new_customer_id = None
         try:
-            # Ensure connection is still valid (or reconnect)
-            if not conn or getattr(conn, 'closed', True):
-                logging.warning("DB connection invalid before insert. Reconnecting."); conn = get_db_connection()
-                if not conn: raise ConnectionError("DB connection lost before registration transaction.")
-            db_type = getattr(conn, 'driver_name', 'Unknown') # Re-check db_type after potential reconnect
+            # Double-check connection state (paranoid check)
+            if not conn or not conn.is_connected():
+                logging.error("DB connection lost before main registration transaction.")
+                flash("Database connection lost. Please try registering again.", "error")
+                # No 'return' here, let finally block handle closure if needed
+                raise ConnectionError("Database connection lost before transaction.") # Raise error
 
-            cursor = conn.cursor() # Use standard cursor for DML with RETURNING
-            needs_rollback = True
+            # --- Determine cursor type for the main transaction ---
+            # We need dictionary access later potentially, so use appropriate cursor
+            if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                db_type = "PostgreSQL"
+            elif MYSQL_AVAILABLE and hasattr(conn, 'is_connected'):
+                cursor = conn.cursor(dictionary=True)
+                db_type = "MySQL"
+            else:
+                cursor = conn.cursor() # Fallback basic cursor
+                db_type = "Fallback"
+            logging.debug(f"Register: Using {db_type} cursor for transaction.")
+            # --- End Cursor Type Determination ---
+
+            needs_rollback = True # Assume rollback needed until commit succeeds
             hashed_pw = generate_password_hash(password)
-            phone_number_to_db = phone_number if phone_number else None
 
             # --- Insert Customer ---
-            sql_insert_customer = "INSERT INTO customers (customer_name, email, password_hash, phone_number) VALUES (%s, %s, %s, %s)"
-            returning_cust_clause = " RETURNING customer_id" if db_type == 'psycopg2' else ""
+            sql_insert_customer = """
+                INSERT INTO customers
+                (customer_name, email, password_hash, phone_number)
+                VALUES (%s, %s, %s, %s)
+            """
+            phone_number_to_db = phone_number if phone_number else None
             customer_params = (customer_name, email, hashed_pw, phone_number_to_db)
-            logging.debug(f"Executing customer insert ({db_type}): {sql_insert_customer + returning_cust_clause}")
-            cursor.execute(sql_insert_customer + returning_cust_clause, customer_params)
 
-            # --- Get new_customer_id (Robustly) ---
-            if db_type == 'psycopg2':
-                returned_row = cursor.fetchone()
-                logging.debug(f"PG customer insert RETURNING result: {returned_row}")
-                if returned_row and len(returned_row) > 0:
-                    new_customer_id = returned_row[0]
-                else:
-                    raise DB_ERROR_TYPE("Failed to retrieve customer ID after insert (PG).")
-            else: # MySQL or Fallback
-                new_customer_id = cursor.lastrowid
-                logging.debug(f"MySQL customer insert lastrowid: {new_customer_id}")
-                if not new_customer_id:
-                     # Fallback query if lastrowid is None/0 for MySQL
-                     logging.warning(f"lastrowid failed for {db_type}, attempting fallback query for customer ID.")
-                     # Ensure cursor is usable after potential failed lastrowid check
-                     if cursor.is_connected if hasattr(cursor, 'is_connected') else True: # Basic check
-                         cursor.execute("SELECT customer_id FROM customers WHERE email = %s", (email,))
-                         fallback_row = cursor.fetchone() # Should return a tuple
-                         logging.debug(f"MySQL customer ID fallback query result: {fallback_row}")
-                         if fallback_row and len(fallback_row) > 0:
-                             new_customer_id = fallback_row[0]
-                         else:
-                              raise DB_ERROR_TYPE("Failed to get customer ID after insert (MySQL fallback failed).")
-                     else:
-                          raise ConnectionError("Cursor disconnected during fallback customer ID fetch.")
-            # --- End Customer ID Retrieval ---
-            logging.info(f"Retrieved customer ID: {new_customer_id}")
+            cursor.execute(sql_insert_customer, customer_params)
+            # Use lastrowid primarily for MySQL, handle PG potentially needing RETURNING
+            new_customer_id = cursor.lastrowid
+            if not new_customer_id and db_type == "MySQL": # Stricter check for MySQL
+                raise DB_ERROR_TYPE("Failed to get customer ID after insert (MySQL).")
+            elif db_type == "PostgreSQL":
+                # For PG, ideally use RETURNING customer_id in the INSERT query
+                # and fetch it. Without it, we assume success if no error.
+                 # Example: cursor.execute(sql_insert_customer + " RETURNING customer_id", customer_params)
+                 #          new_customer_id = cursor.fetchone()['customer_id'] # Fetch from RealDictRow
+                 # If not using RETURNING:
+                 if not new_customer_id:
+                     logging.warning("PostgreSQL lastrowid might be unreliable for customer insert without RETURNING.")
+                     # Need a way to fetch the ID if lastrowid is None/0
+                     cursor.execute("SELECT customer_id FROM customers WHERE email = %s", (email,))
+                     cust_fetch = cursor.fetchone()
+                     if cust_fetch:
+                         new_customer_id = cust_fetch.get('customer_id') # Use .get() for safety with RealDictRow
+                     if not new_customer_id:
+                         raise DB_ERROR_TYPE("Failed to retrieve customer ID after insert (PostgreSQL).")
+
+            logging.debug(f"Inserted customer '{customer_name}' (ID: {new_customer_id}) with phone: {phone_number_to_db}")
 
 
-            # --- Generate and Insert Account ---
-            account_number_generated = None; attempt = 0; max_generation_attempts = 10
-            while attempt < max_generation_attempts:
-                attempt += 1; min_acc=10**11; max_acc=(10**12)-1
-                potential_acc_num = str(random.randint(min_acc, max_acc))
-                logging.debug(f"Attempt {attempt}: Potential Acc No: {potential_acc_num}")
-                try:
-                    cursor.execute("SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1", (potential_acc_num,))
-                    if not cursor.fetchone():
-                         account_number_generated = potential_acc_num
-                         logging.info(f"Unique Acc No found: {account_number_generated}")
-                         break
-                    else:
-                         logging.warning(f"Acc No {potential_acc_num} exists. Retrying...")
-                except DB_ERROR_TYPE as check_err:
-                    raise ValueError(f"DB error check acc uniqueness: {check_err}") # Re-raise critical error
+            # =========================================================== #
+            # === START: Generate and Insert Account (Replaces old code) === #
+            # =========================================================== #
+            try:
+                max_generation_attempts = 10 # Safety limit for uniqueness check loop
+                attempt = 0
+                account_number_generated = None # Initialize
 
-            if account_number_generated is None:
-                raise ValueError(f"Could not generate unique account number after {max_generation_attempts} tries.")
+                while attempt < max_generation_attempts:
+                    attempt += 1
+                    # Generate a 12-digit account number as a string
+                    min_acc_num = 10**11  # 1 followed by 11 zeros (12 digits total)
+                    max_acc_num = (10**12) - 1 # Max 12-digit number
+                    potential_acc_num = str(random.randint(min_acc_num, max_acc_num))
+                    logging.debug(f"Attempt {attempt}: Generated potential account number: {potential_acc_num}")
 
-            # Insert account with generated number
-            sql_insert_account = "INSERT INTO accounts (customer_id, balance, account_number) VALUES (%s, %s, %s)"
-            returning_acc_clause = " RETURNING account_id" if db_type == 'psycopg2' else ""
-            account_params = (new_customer_id, str(app.config['INITIAL_BALANCE']), account_number_generated)
-            logging.debug(f"Executing account insert ({db_type}): {sql_insert_account + returning_acc_clause}")
-            cursor.execute(sql_insert_account + returning_acc_clause, account_params)
+                    # --- Check if account number already exists ---
+                    # Use a separate 'try' for the check query itself
+                    exists = None # Reset exists for each attempt
+                    try:
+                        # We can reuse the main cursor for this check within the transaction
+                        cursor.execute("SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1", (potential_acc_num,))
+                        exists = cursor.fetchone() # Will be None/empty dict/RealDictRow if not found
 
-            # --- Verify account insertion (get ID - Robustly) ---
-            inserted_account_id = None # Initialize
-            if db_type == 'psycopg2':
-                 acc_row = cursor.fetchone()
-                 logging.debug(f"PG account insert RETURNING result: {acc_row}")
-                 if not acc_row or len(acc_row) == 0: raise DB_ERROR_TYPE(f"Failed retrieve account ID cust {new_customer_id} (PG).")
-                 inserted_account_id = acc_row[0]
-            else: # MySQL or Fallback check
-                 inserted_account_id = cursor.lastrowid
-                 logging.debug(f"MySQL account insert lastrowid: {inserted_account_id}")
-                 if not inserted_account_id:
-                      logging.warning(f"lastrowid failed for {db_type}, attempting fallback query for account ID.")
-                      if cursor.is_connected if hasattr(cursor, 'is_connected') else True:
-                           cursor.execute("SELECT account_id FROM accounts WHERE customer_id = %s and account_number = %s", (new_customer_id, account_number_generated))
-                           fallback_acc_row = cursor.fetchone()
-                           logging.debug(f"MySQL account ID fallback query result: {fallback_acc_row}")
-                           if fallback_acc_row and len(fallback_acc_row) > 0:
-                               inserted_account_id = fallback_acc_row[0]
-                           else:
-                                raise DB_ERROR_TYPE(f"Failed get account ID cust {new_customer_id} (MySQL fallback failed).")
-                      else:
-                           raise ConnectionError("Cursor disconnected during fallback account ID fetch.")
-            # --- End Account ID Retrieval ---
-            logging.info(f"Retrieved account ID: {inserted_account_id}")
-            logging.debug(f"Inserted account {inserted_account_id} cust {new_customer_id} AccNo: {account_number_generated}")
+                        if not exists:
+                            # Unique number found!
+                            account_number_generated = potential_acc_num
+                            logging.info(f"Unique account number found after {attempt} attempts: {account_number_generated}")
+                            break # Exit the while loop (found unique number)
+                        else:
+                            logging.warning(f"Account number {potential_acc_num} already exists. Retrying...")
 
-            # --- Commit ---
+                    except DB_ERROR_TYPE as check_err: # Catch specific DB error for check query
+                         logging.error(f"Database error during account number uniqueness check: {check_err}")
+                         # Re-raise to ensure the outer transaction block catches it and rolls back
+                         raise ValueError(f"DB error checking account uniqueness: {check_err}")
+
+                # --- Check if we exhausted attempts ---
+                if account_number_generated is None:
+                    logging.critical(f"Failed to generate a unique 12-digit account number after {max_generation_attempts} attempts for customer {new_customer_id}.")
+                    # Raise an error to ensure the main transaction is rolled back
+                    raise ValueError("Could not generate a unique account number.")
+
+                # --- Insert Account with the verified unique number ---
+                sql_insert_account = """
+                    INSERT INTO accounts
+                    (customer_id, balance, account_number)
+                    VALUES (%s, %s, %s)
+                """
+                account_params = (
+                    new_customer_id,
+                    str(app.config['INITIAL_BALANCE']),
+                    account_number_generated # Use the verified unique number
+                )
+                cursor.execute(sql_insert_account, account_params)
+
+                # --- Account ID Check (Optional/Improved) ---
+                # Again, RETURNING account_id is best for PostgreSQL
+                # If using lastrowid:
+                inserted_account_id = cursor.lastrowid
+                if not inserted_account_id and db_type == "MySQL":
+                    raise DB_ERROR_TYPE(f"Failed to get account ID after insert for customer {new_customer_id} (MySQL).")
+                elif db_type == "PostgreSQL" and not inserted_account_id:
+                     # Potentially fetch it if needed, or just log warning
+                     logging.warning(f"Account ID check (lastrowid) might be unreliable for PostgreSQL without RETURNING clause for customer {new_customer_id}.")
+                     # You *could* try fetching based on customer_id and account_number if needed,
+                     # but often the ID isn't immediately required after insertion here.
+
+                logging.debug(f"Inserted account (ID check relevant for MySQL/logged for PG) for customer {new_customer_id} with Acc No: {account_number_generated}")
+
+            # Catch errors specifically from account generation/insertion phase
+            except (DB_ERROR_TYPE, ValueError) as acc_err:
+                 # If account insert fails, we MUST rollback the customer insert too
+                 logging.error(f"Failed to generate/insert account for new customer {new_customer_id}: {acc_err}")
+                 raise acc_err # Re-raise to trigger the outer rollback
+
+            # =========================================================== #
+            # === END: Generate and Insert Account                      === #
+            # =========================================================== #
+
+
+            # --- Commit Transaction ---
+            # If we reach here, both customer and account inserts (including unique check) were successful
             conn.commit()
-            needs_rollback = False
-            logging.info(f"Successfully registered user: '{customer_name}' ({email}), ID: {new_customer_id}")
+            needs_rollback = False # No need to rollback if commit succeeded
+            logging.info(f"Successfully registered new user: '{customer_name}' ({email}), ID: {new_customer_id}")
             flash("Registration successful! You can now log in.", "success")
 
-            # Explicitly close resources after commit before redirect
-            if cursor: cursor.close(); cursor=None
-            if conn: close_db_connection(conn); conn=None
+            # Close resources and redirect AFTER successful commit
+            if cursor: cursor.close()
+            close_db_connection(conn)
             return redirect(url_for('login'))
 
-        # --- Catch Errors during Transaction ---
-        except (DB_ERROR_TYPE, ConnectionError, ValueError) as e:
-            error_msg = str(e)
-            logging.error(f"Registration DB/Value error ({db_type}) for {email}: {error_msg}", exc_info=isinstance(e, ConnectionError))
-            flash(f"Registration failed: {error_msg}" if isinstance(e, ValueError) else "Database error during registration.", "error")
+        # --- Outer Exception Handling for the entire transaction ---
+        except (DB_ERROR_TYPE, ConnectionError, ValueError) as e: # Catch specific errors first
+            # Handle DB errors, connection errors, or value errors (like unique acc num fail)
+            logging.error(f"Database or Value error during registration insert/commit for {email}: {e}", exc_info=isinstance(e, ConnectionError)) # Log traceback for connection errors
+            # Provide a generic message unless it's a specific value error we want to show
+            if isinstance(e, ValueError):
+                flash(f"Registration failed: {e}", "error")
+            else:
+                flash("A database error occurred during registration.", "error")
         except Exception as e:
-            logging.error(f"Unexpected registration error for {email}: {e}", exc_info=True)
+            # Handle any other unexpected errors during the transaction
+            logging.error(f"Unexpected error during registration insert/commit: {e}", exc_info=True)
             flash("An unexpected error occurred during registration.", "error")
-        finally: # Rollback and cleanup if necessary
-            if conn and not getattr(conn, 'closed', True):
+        finally:
+            # Cleanup: Rollback if needed, close cursor/connection
+            if conn and conn.is_connected():
                 if needs_rollback:
                     try:
                         conn.rollback()
-                        logging.warning(f"Registration rolled back for '{email}'.")
-                    except Exception as rb_err: # Catch any rollback error
-                         logging.error(f"Rollback failed: {rb_err}")
-                # Safe cursor close
+                        logging.warning(f"Registration transaction rolled back for '{email}'.")
+                    except DB_ERROR_TYPE as rb_err: # Catch specific DB rollback error
+                        logging.error(f"Rollback attempt failed for '{email}': {rb_err}")
+                    except Exception as rb_gen_err: # Catch generic rollback error
+                         logging.error(f"Generic rollback attempt failed for '{email}': {rb_gen_err}")
                 if cursor:
-                    try:
-                        cursor.close()
-                    except DB_ERROR_TYPE: pass # Ignore DB-specific errors closing cursor
-                    except Exception as cur_close_err: logging.warning(f"Non-DB error closing registration cursor: {cur_close_err}")
-                # Always close connection if opened in this block
-                close_db_connection(conn)
+                    try: cursor.close()
+                    except DB_ERROR_TYPE: pass # Ignore specific cursor close errors here
+                    except Exception: pass
+                close_db_connection(conn) # Always close the connection used for the transaction attempt
 
-        # Re-render form if transaction failed
+        # If we reach here, it means the 'try' block failed during the transaction
+        # Re-render the form (flashed errors will be displayed)
         return render_template('register.html', form=form)
 
     # --- Handle GET Request ---
+    # This renders the initial empty form or re-renders if WTForms validation failed on initial POST
     return render_template('register.html', form=form)
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Handles user login."""
     if g.user: return redirect(url_for('index'))
     form = LoginForm() if WTFORMS_AVAILABLE else None
-    logging.debug(f"Login route accessed, method: {request.method}") # Log access
 
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
 
         email = form.email.data if WTFORMS_AVAILABLE else request.form.get('email', '').strip().lower()
         password = form.password.data if WTFORMS_AVAILABLE else request.form.get('password', '')
-        logging.info(f"Login attempt for email: {email}") # Log attempt
 
-        if not email or not password:
+        if not email or not password: # Basic check if no WTForms
             flash("Email and password are required.", "error")
             return render_template('login.html', form=form)
 
-        # *** DEBUG: Check user lookup ***
         customer = get_user_by_email(email)
-        logging.debug(f"Result of get_user_by_email({email}): {'User found' if customer else 'User NOT found'}")
 
-        if customer:
-            # *** DEBUG: Check password hash ***
-            stored_hash = customer.get('password_hash', '')
-            logging.debug(f"Stored hash found: {'Yes' if stored_hash else 'No'}")
-            is_valid_password = check_password_hash(stored_hash, password)
-            logging.debug(f"Password check result: {is_valid_password}")
+        if customer and check_password_hash(customer.get('password_hash',''), password):
+            # Login successful
+            session.clear()
+            session['user_id'] = customer['customer_id']
+            session.permanent = True # Use configured lifetime
+            g.user = {'id': customer['customer_id'], 'name': customer['customer_name'], 'email': customer['email']} # Load g.user
 
-            if is_valid_password:
-                # Login successful path
-                session.clear()
-                session['user_id'] = customer['customer_id']
-                session.permanent = True
-                # *** DEBUG: Confirm session set ***
-                logging.debug(f"Session user_id set to: {session.get('user_id')}")
+            logging.info(f"User {customer['customer_name']} (ID: {customer['customer_id']}) logged in.")
+            flash(f"Welcome back, {customer.get('customer_name', 'User')}!", "success")
 
-                # Manually load g.user immediately for this request context
-                # (load_logged_in_user will run again on next request)
-                g.user = {'id': customer['customer_id'], 'name': customer['customer_name'], 'email': customer['email']}
-                logging.info(f"User {g.user['name']} (ID: {g.user['id']}) login successful. Redirecting...")
-
-                flash(f"Welcome back, {g.user.get('name', 'User')}!", "success")
-                next_page = request.args.get('next')
-                # *** DEBUG: Check redirect target ***
-                redirect_target = next_page if next_page and next_page.startswith('/') and ' ' not in next_page else url_for('index')
-                logging.debug(f"Redirecting to: {redirect_target}")
-                return redirect(redirect_target)
+            next_page = request.args.get('next')
+            if next_page and next_page.startswith('/') and ' ' not in next_page: # Basic redirect check
+                return redirect(next_page)
             else:
-                # Invalid password path
-                logging.warning(f"Failed login attempt for {email}: Invalid password.")
-                flash("Invalid email or password.", "error")
+                return redirect(url_for('index'))
         else:
-            # User not found path
-            logging.warning(f"Failed login attempt for {email}: User not found.")
-            flash("Invalid email or password.", "error") # Keep message generic
+            # Login failed
+            logging.warning(f"Failed login attempt for email: {email}")
+            flash("Invalid email or password.", "error")
 
-    # Handle GET request or failed POST validation
+    # Handle GET request or failed POST
     return render_template('login.html', form=form)
 
 @app.route('/logout')
 @login_required
 def logout():
-    user_name = g.user.get('name', 'N/A'); user_id = g.user.get('id', 'N/A')
-    clear_qkd_session_log(); session.clear()
-    flash("Logged out.", "info"); logging.info(f"User {user_name} (ID: {user_id}) logged out.")
+    """Logs the user out."""
+    user_name = g.user.get('name', 'N/A')
+    user_id = g.user.get('id', 'N/A')
+    clear_qkd_session_log() # Clear specific session data
+    session.clear() # Clear all session data
+    flash("You have been successfully logged out.", "info")
+    logging.info(f"User {user_name} (ID: {user_id}) logged out.")
     return redirect(url_for('login'))
+
+# Inside app.py
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
     """Handles password reset request (sending email)."""
     if g.user: return redirect(url_for('index')) # Redirect if already logged in
-    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None # Instantiate form
+    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None # Instantiate form if WTForms available
 
     # --- Prerequisite Check ---
+    # Ensure mail and serializer components are ready before proceeding
     if not MAIL_AVAILABLE or not serializer:
         log_msg = "Password reset unavailable:"
         if not MAIL_AVAILABLE: log_msg += " Mail system not configured/available."
         if not serializer: log_msg += " Serializer not initialized (SECRET_KEY issue?)."
         logging.warning(log_msg)
         flash("Password reset service is currently unavailable.", "warning")
-        return redirect(url_for('login'))
+        return redirect(url_for('login')) # Redirect if prerequisites fail
 
     # --- Handle POST Request ---
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
@@ -995,6 +1300,7 @@ def forgot_password():
 
         # --- 1. Extract Email ---
         email = form.email.data if WTFORMS_AVAILABLE else request.form.get('email','').strip().lower()
+        # Basic validation if WTForms not used
         if not email or '@' not in email:
              flash("Please enter a valid email address.", "error")
              return render_template('forgot_password.html', form=form)
@@ -1008,581 +1314,1072 @@ def forgot_password():
         if user:
             try:
                 # Generate Timed Token
-                token_expiration_seconds = 600 # 10 minutes* 60 seconds validity
+                token_expiration_seconds = 3600 # 1 hour validity
+                # Use a specific salt for password reset tokens
                 token = serializer.dumps(email, salt='password-reset-salt')
+                # Generate the full external URL for the reset link
                 reset_url = url_for('reset_password', token=token, _external=True)
                 logging.info(f"Generated password reset token/URL for {email}")
 
                 # Prepare Email Content
-                subject = "Password Reset Request - QSB Secure Bank"
-                recipients = [email] # List of recipients
+                subject = "Password Reset Request - QKD Secure Bank"
+
+                # *** CUSTOMIZE SENDER DISPLAY ***
+                # Define the display name and use the configured sender address
+                # This tuple formats the 'From' field in many email clients
+                sender_display_tuple = ("QSB Secure Banking", app.config['MAIL_DEFAULT_SENDER'])
+                # *** END CUSTOMIZATION ***
+
+                recipients_list = [email] # Use a clear variable name
                 email_body = f"""Hello {user.get('customer_name', 'Valued Customer')},
 
-You requested to reset your password for your QSB Secure Bank account.
+You recently requested to reset your password for your QKD Secure Bank account.
 Click the link below to set a new password:
 
 {reset_url}
 
 This link is valid for {token_expiration_seconds // 60} minutes.
 
-If you did not request this, please ignore this email.
+If you did not request a password reset, please ignore this email or contact support if you have concerns.
 
 Thank you,
-The QSB Secure Bank Team"""
+The QKD Secure Bank Team"""
 
-                # --- MODIFIED SENDER LOGIC ---
-                # Explicitly use only the email address from config as the sender address
-                # Prefer MAIL_USERNAME as it's used for auth, fallback to MAIL_DEFAULT_SENDER if needed
-                # Ensure MAIL_DEFAULT_SENDER env var is also JUST the email on Render
-                sender_email_address = app.config.get('MAIL_USERNAME') or app.config.get('MAIL_DEFAULT_SENDER')
+                # Create the Flask-Mail Message object
+                msg = Message(subject=subject,
+                              # Use the tuple for the sender argument
+                              sender=sender_display_tuple,
+                              recipients=recipients_list,
+                              body=email_body)
 
-                if not sender_email_address:
-                     logging.critical("CRITICAL: Mail sender (MAIL_USERNAME or MAIL_DEFAULT_SENDER) is not configured in environment variables!")
-                     # Don't flash specific internal errors to user
-                     # Fall through to generic message, but log critical error
-                else:
-                     logging.debug(f"Using sender email address: {sender_email_address}")
-                     # Create the Flask-Mail Message object using only the email string for sender
-                     msg = Message(subject=subject,
-                                   sender=sender_email_address, # Explicitly use just the email address
-                                   recipients=recipients,
-                                   body=email_body)
-
-                     # Queue the email for sending in a background thread
-                     thread = Thread(target=send_async_email, args=[current_app.app_context(), msg])
-                     thread.start()
-                     logging.info(f"Password reset email queued for background sending to {email}")
-                # --- END MODIFIED SENDER LOGIC ---
+                # Queue the email for sending in a background thread
+                # Pass the application context to the thread function
+                thread = Thread(target=send_async_email, args=[current_app.app_context(), msg])
+                thread.start()
+                logging.info(f"Password reset email queued for background sending to {email}")
 
             except Exception as e:
                 # Log errors during token generation or email queuing
                 logging.error(f"ERROR generating token or queueing email for {email}: {e}", exc_info=True)
-                # IMPORTANT: Do not flash a specific error here
+                # IMPORTANT: Do not flash a specific error here to avoid revealing internal issues
+                # The code will fall through to the generic success message below
 
         elif not user:
             # Log the attempt for a non-existent email but don't inform the requester
             logging.info(f"Password reset requested for non-existent email address: {email}")
 
         # --- 4. Show Generic Confirmation Message ---
-        # Always flash the same message regardless of user existence or internal errors
+        # Always flash the same message regardless of whether the user exists
+        # or if an internal error occurred during email sending.
+        # This prevents attackers from probing for valid email addresses.
         flash('If an account with that email address exists, instructions have been sent. Please also check your spam or junk folder.', 'info')
-        return redirect(url_for('login')) # Redirect after processing
+        # Redirect to the login page after processing the request
+        return redirect(url_for('login'))
 
     # --- Handle GET Request ---
     # Show the forgot password form initially
     return render_template('forgot_password.html', form=form)
-  
+
 
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
     """Handles the password reset form submitted via the email link."""
-    if g.user:
-        flash("Already logged in.", "info")
-        return redirect(url_for('index'))
+    if g.user: flash("Already logged in.", "info"); return redirect(url_for('index'))
     if not serializer:
-        flash("Password reset service is unavailable.", "warning")
-        return redirect(url_for('login'))
+        flash("Password reset service is unavailable.", "warning"); return redirect(url_for('login'))
 
     email = None
     try:
-        # Validate token and extract email
-        email = serializer.loads(token, salt='password-reset-salt', max_age=600) # 10 minutes expiry
+        email = serializer.loads(token, salt='password-reset-salt', max_age=3600) # 1 hour expiry
         logging.info(f"Valid password reset token decoded for: {email}")
     except SignatureExpired:
-        flash('Password reset link has expired.', 'error')
-        return redirect(url_for('forgot_password'))
-    except BadTimeSignature: # More specific exception
-        flash('Password reset link is invalid or tampered.', 'error')
-        return redirect(url_for('forgot_password'))
-    except Exception as e: # Catch other potential load errors
-        logging.warning(f"Invalid password reset token error: {e}")
-        flash('Invalid password reset link.', 'error')
-        return redirect(url_for('forgot_password'))
+        flash('Password reset link has expired.', 'error'); return redirect(url_for('forgot_password'))
+    except BadTimeSignature:
+        flash('Password reset link is invalid or tampered.', 'error'); return redirect(url_for('forgot_password'))
+    except Exception as e:
+        logging.warning(f"Invalid password reset token error: {e}"); flash('Invalid password reset link.', 'error'); return redirect(url_for('forgot_password'))
 
-    # Verify user exists
     user = get_user_by_email(email)
     if not user:
-        flash('User account associated with this link not found.', 'error')
-        return redirect(url_for('forgot_password'))
+        flash('User account associated with this link not found.', 'error'); return redirect(url_for('forgot_password'))
 
-    # Handle Form
     form = ResetPasswordForm() if WTFORMS_AVAILABLE else None
+
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
 
         new_password = form.password.data if WTFORMS_AVAILABLE else request.form.get('password')
         confirm_password = form.confirm_password.data if WTFORMS_AVAILABLE else request.form.get('confirm_password')
 
-        # Manual validation if WTForms not used
+        # Manual validation if no WTForms
         if not WTFORMS_AVAILABLE:
              errors = []
-             if not new_password or len(new_password) < 8: errors.append("Password must be at least 8 characters long.")
-             if new_password != confirm_password: errors.append("Passwords do not match.")
+             if not new_password or len(new_password) < 8: errors.append("Password min 8 chars")
+             if new_password != confirm_password: errors.append("Passwords don't match")
              if errors:
                  for err in errors: flash(err, 'error')
-                 # Pass token back to template for GET request rendering if validation fails
                  return render_template('reset_password.html', form=form, token=token)
 
         # --- Update Password in DB ---
         new_pw_hash = generate_password_hash(new_password)
         conn = None; cursor = None; updated = False; needs_rollback = False
 
-        try: # Main try block for database transaction
-            conn = get_db_connection()
-            if not conn:
-                # Check connection immediately after getting it
-                flash('Database connection error. Cannot update password.', 'error')
-                # Ensure conn is None if it failed, to prevent issues in finally
-                conn = None
-                return render_template('reset_password.html', form=form, token=token)
+        conn = get_db_connection() # Get connection outside try for finally block access
+        if not conn:
+            flash('Database error. Cannot update password.', 'error')
+            return render_template('reset_password.html', form=form, token=token)
 
-            cursor = conn.cursor() # Standard cursor for UPDATE
+        try: # Try block for the database update transaction
+            cursor = conn.cursor()
             needs_rollback = True
-            sql = "UPDATE customers SET password_hash = %s WHERE email = %s AND customer_id = %s"
+            sql = "UPDATE customers SET password_hash = %s WHERE email = %s AND customer_id = %s" # Be specific
             params = (new_pw_hash, email, user['customer_id'])
-
             cursor.execute(sql, params)
-            rows = cursor.rowcount # Get affected rows count
+            rows = cursor.rowcount
             logging.info(f"Password update query for {email}, rows affected: {rows}")
 
             if rows == 1:
-                conn.commit() # Commit the change
+                conn.commit()
                 updated = True
-                needs_rollback = False # Don't rollback after successful commit
+                needs_rollback = False
                 logging.info(f"Password updated successfully for {email}")
             elif rows == 0:
-                # Could happen if user deleted between token generation and update
                 logging.error(f"Password update failed (rows=0) for {email}. User mismatch or deleted?")
                 flash('Password update failed (user mismatch or no change).', 'error')
-            else: # Should not happen due to WHERE clause specificity
-                logging.error(f"Password update affected unexpected rows ({rows}) for {email}. Rolling back.")
-                flash('Password update failed (unexpected database state).', 'error')
-                # Rollback will happen in finally
+            else: # Should not happen
+                logging.error(f"Password update affected unexpected rows ({rows}) for {email}.")
+                flash('Password update failed (unexpected error).', 'error')
 
-        except DBError as e: # Catch PostgreSQL specific errors
-            logging.error(f"DB Error during password reset for {email}: {e}", exc_info=True)
+        except MySQLError as e:
+            logging.error(f"DB Error resetting password for {email}: {e}", exc_info=True)
             flash('Database error during password update.', 'error')
-        except Exception as e: # Catch other unexpected errors
-            logging.error(f"Unexpected error during password reset for {email}: {e}", exc_info=True)
+        except Exception as e:
+            logging.error(f"Unexpected error resetting password for {email}: {e}", exc_info=True)
             flash('Unexpected error during password update.', 'error')
-        finally: # Cleanup for the database transaction try block
-            # Check connection object exists and is not closed before cleanup
-            if conn and not getattr(conn, 'closed', True):
-                if needs_rollback:
-                    try:
-                        conn.rollback()
-                        logging.warning(f"Password reset transaction rolled back for {email}.")
-                    except DB_ERROR_TYPE as rb_err: # Use global DB_ERROR_TYPE
-                        logging.error(f"Rollback attempt failed during password reset: {rb_err}")
-                    except Exception as rb_gen_err:
-                        logging.error(f"Unexpected error during reset rollback: {rb_gen_err}")
+        finally: # Finally block associated with the DB transaction try
+             if conn and conn.is_connected(): # Check connection is still valid
+                 if needs_rollback:
+                     try:
+                         conn.rollback()
+                         logging.warning(f"Password reset transaction rolled back for {email}.")
+                     except MySQLError as rb_err:
+                         logging.error(f"Rollback failed during password reset: {rb_err}")
+                 if cursor: cursor.close()
+                 close_db_connection(conn) # Close connection used for this operation
 
-                # --- CORRECTED CURSOR CLOSE for Reset Password ---
-                if cursor:
-                    try:
-                        cursor.close()
-                    except DB_ERROR_TYPE: # Use global DB_ERROR_TYPE
-                        pass # Ignore DB-specific errors closing cursor
-                    except Exception as cur_close_err:
-                        logging.warning(f"Non-DB error closing reset password cursor: {cur_close_err}")
-                # --- END CORRECTION ---
-
-                # Close the connection used for this operation
-                close_db_connection(conn)
-        # --- END of finally block ---
-
-        # Redirect or re-render based on update success
         if updated:
             flash('Password has been reset successfully. Please log in.', 'success')
             return redirect(url_for('login'))
         else:
-            # Re-render form if update failed
+            # Re-render form if update failed after DB interaction
             return render_template('reset_password.html', form=form, token=token)
 
-    # Handle GET request (show the form)
+    # Handle GET request
     return render_template('reset_password.html', form=form, token=token)
 
+import traceback # Ensure traceback is imported if not already
+import hashlib # Ensure hashlib is imported
+import base64 # Ensure base64 is imported
+from cryptography.fernet import Fernet, InvalidToken # Ensure Fernet/InvalidToken are imported
+from decimal import Decimal, InvalidOperation # Ensure Decimal/InvalidOperation are imported
+# Assume other necessary imports like Flask, request, session, g, etc., are already present
 
-@app.route('/transfer', methods=['POST'])
+@app.route('/transfer-funds', methods=['POST'])
 @login_required
 def transfer_funds():
+    """Handles the fund transfer process including QKD and Fraud Check."""
     # --- Variable Initialization ---
     sender_id = None; receiver_id = None; amount = None; simulate_eve_checked = False
+    # Ensure g.user is populated correctly by before_request/user_loader
+    if not g.user or 'id' not in g.user:
+        flash("User session error. Please log in again.", "error")
+        return redirect(url_for('login')) # Or index if preferred
     logged_in_user_id = g.user['id']
+
     qkd_key = None; sim_res = {}; qber = -1.0; qkd_fail_reason = None
     log_status = "INITIATED"; fraud_res = {'is_fraudulent': False, 'reason': None, 'ml_score': -1.0}
     last_outcome = {'timestamp': datetime.datetime.now().isoformat(), 'status': 'Pending', 'reason': ''}
-    session.pop('last_transfer_outcome', None) # Clear previous outcome from session
+    session.pop('last_transfer_outcome', None) # Clear previous outcome
 
     # --- 1. Input Validation & Form Handling ---
     try:
-        # Re-initialize for safety within try
-        sender_id = None; receiver_id = None; amount = None; simulate_eve_checked = False
-
-        # Get Sender Account Info
+        # Get Sender Account (Needs to happen first)
+        # Ensure get_accounts_data is defined and works
         user_accounts = get_accounts_data(customer_id_filter=logged_in_user_id)
-        if user_accounts is None: raise ConnectionError("Database error fetching sender account.")
-        if not user_accounts: raise ValueError("Sender account could not be found.")
-        sender_account = user_accounts[0] # Assume first account for simplicity
-        sender_id = sender_account['account_id']
+        if user_accounts is None: raise ConnectionError("DB error fetching sender account.")
+        if not user_accounts: raise ValueError("Sender account details not found.")
+        sender_account = user_accounts[0]
+        sender_id = sender_account.get('account_id') # Use .get() for safety
+        if sender_id is None: raise ValueError("Sender account ID missing.")
         last_outcome['sender_id'] = sender_id
 
-        # Handle Form Submission Data
+        # Assume WTFORMS_AVAILABLE = True/False is set globally
+        # Assume TransferForm is defined globally if WTFORMS_AVAILABLE
         if WTFORMS_AVAILABLE:
-            transfer_form = TransferForm(request.form) # Instantiate with POST data
+            logging.debug("WTForms available, attempting validation.")
+            transfer_form = TransferForm(request.form) # Use submitted data
 
-            # Dynamically populate choices for validation to work correctly
-            all_accounts = get_accounts_data()
-            if all_accounts is None: raise ConnectionError("Database error fetching recipient list for validation.")
-            receiver_choices_list = [acc for acc in all_accounts if acc.get('customer_id') != logged_in_user_id]
-            # Ensure choice values are strings to match WTForms default behavior with SelectField
-            transfer_form.receiver_account_id.choices = [('', '-- Select Recipient --')] + \
-                                                        [(str(acc['account_id']), f"{acc['customer_name']} (Acc ID: {acc['account_id']})")
-                                                         for acc in receiver_choices_list]
+            # Repopulate choices dynamically for validation
+            all_accounts_choices = get_accounts_data() # Fetch ALL accounts
+            if all_accounts_choices is None: raise ConnectionError("DB error fetching recipient list.")
+            # Filter out the sender's own accounts
+            receiver_choices_list = [acc for acc in all_accounts_choices if acc.get('customer_id') != logged_in_user_id]
+            # IMPORTANT: Convert account_id to string for WTForms choices value matching request.form
+            transfer_form.receiver_account_id.choices = [
+                (str(acc['account_id']), f"{acc.get('customer_name', 'Unknown')} (Acc ID: {acc['account_id']})")
+                for acc in receiver_choices_list if acc.get('account_id') is not None
+            ]
+            # Add the placeholder option
+            transfer_form.receiver_account_id.choices.insert(0, ('', '-- Select Recipient --'))
 
-            if transfer_form.validate_on_submit(): # Validate the submitted data
+            if transfer_form.validate_on_submit():
+                logging.debug("WTForms validation successful.")
                 receiver_id_str = transfer_form.receiver_account_id.data
-                amount = transfer_form.amount.data # WTForms DecimalField provides Decimal
-                simulate_eve_checked = transfer_form.simulate_eve.data
-                # Convert receiver_id_str to int AFTER successful validation
+                amount = transfer_form.amount.data # DecimalField handles conversion
+                simulate_eve_checked = transfer_form.simulate_eve.data # BooleanField handles conversion
+
+                # Convert receiver ID string to int AFTER validation
+                if not receiver_id_str: raise ValueError("Recipient selection error (post-validation).")
                 try: receiver_id = int(receiver_id_str)
-                except (ValueError, TypeError): raise ValueError("Invalid recipient ID format received.")
-            else:
-                # Collate errors if WTForms validation fails
-                error_msg = "; ".join([f"{field.replace('_', ' ').title()}: {', '.join(errs)}"
-                                        for field, errs in transfer_form.errors.items()])
-                raise ValueError(f"Invalid input: {error_msg}")
-        else:
-            # Manual parsing if WTForms is unavailable
+                except ValueError: raise ValueError("Invalid recipient ID format (post-validation).")
+
+            else: # WTForms validation failed
+                logging.warning(f"WTForms validation failed. Errors: {transfer_form.errors}")
+                # Collect errors nicely
+                error_messages = []
+                for field, errs in transfer_form.errors.items():
+                     field_name = getattr(getattr(transfer_form, field, None), 'label', None)
+                     field_label = field_name.text if field_name else field.replace('_', ' ').title()
+                     error_messages.append(f"{field_label}: {', '.join(errs)}")
+                raise ValueError("Invalid input: " + "; ".join(error_messages))
+
+        else: # Manual parsing if WTForms unavailable
+            logging.debug("WTForms not available, using manual parsing.")
             receiver_id_str = request.form.get('receiver_account_id')
             amount_str = request.form.get('amount')
-            simulate_eve_checked = 'simulate_eve' in request.form
+            simulate_eve_checked = 'simulate_eve' in request.form # Checkbox presence
 
+            # Manual Validation
             if not receiver_id_str: raise ValueError("Please select a recipient account.")
             try: receiver_id = int(receiver_id_str)
-            except (ValueError, TypeError): raise ValueError("Invalid recipient account ID selected.")
+            except ValueError: raise ValueError("Invalid recipient account ID selected.")
+
             if not amount_str: raise ValueError("Amount is missing.")
-            try: amount = Decimal(amount_str.strip())
-            except InvalidOperation: raise ValueError("Invalid amount format (e.g., 100.50).")
+            try:
+                amount = Decimal(amount_str.strip())
+                if amount <= 0: raise ValueError("Amount must be positive.")
+            except InvalidOperation: raise ValueError("Invalid amount format.")
+            except ValueError as e: raise ValueError(str(e)) # Catch amount <=0 error
 
-        # --- Common Validations (Post-Parsing/Validation) ---
-        if not isinstance(receiver_id, int): raise ValueError("Internal Error: Recipient ID is invalid.")
+        # --- Common Validations (Post-Parsing / Post-WTForms) ---
+        if not isinstance(receiver_id, int): raise ValueError("Internal error: Recipient ID invalid type.")
         if sender_id == receiver_id: raise ValueError("Cannot transfer funds to your own account.")
-        if amount is None or amount <= 0: raise ValueError("Amount must be a positive value (e.g., greater than 0.00).")
+        # Amount validation done above
 
-        # --- Input Validated Successfully ---
+        # --- If all input validation passes ---
         last_outcome.update({'amount': f"{amount:.2f}", 'receiver_id': receiver_id, 'simulate_eve': simulate_eve_checked})
         log_status = "INPUT_VALIDATED"
-        logging.info(f"Transfer Request Validated: ₹{amount:.2f} from Acc {sender_id} to Acc {receiver_id} (Simulate Eve: {simulate_eve_checked})")
+        logging.info(f"Transfer Request Validated: ₹{amount:.2f} from Acc {sender_id} to Acc {receiver_id} (SimEve: {simulate_eve_checked})")
 
     except (ValueError, ConnectionError, TypeError, InvalidOperation, KeyError) as e:
-        # Handle specific input, connection, or data type errors
+        # Catch expected validation/setup errors
         logging.warning(f"Transfer input/setup failed: {e}", exc_info=(isinstance(e, ConnectionError)))
-        flash(f"Transfer Failed: {e}", "error")
+        flash(f"Transfer Failed: {e}", "error") # Use 'error' category
         last_outcome.update({'status': 'Failed', 'reason': f"Input/Setup Error: {str(e)[:100]}"})
         session['last_transfer_outcome'] = last_outcome; session.modified = True
-        # Ensure amount is Decimal before logging failure
-        amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(amount) if amount is not None else Decimal('0.00'))
-        log_failed_attempt(sender_id, receiver_id, amount_for_log, "INPUT_ERROR", exception_info=e)
-        return redirect(url_for('index'))
-    except Exception as e:
-         # Catch any other unexpected errors during the input phase
+        # Log failed attempt (ensure log_failed_attempt is defined and available)
+        amount_for_log = amount if isinstance(amount, Decimal) else Decimal('0.00')
+        # log_failed_attempt(sender_id, receiver_id, amount_for_log, "INPUT_ERROR", exception_info=e)
+        return redirect(url_for('index')) # Redirect back
+
+    except Exception as e: # Catch unexpected errors during input phase
          logging.error(f"Unexpected error during transfer input validation: {e}", exc_info=True)
          flash("An unexpected error occurred while processing your request.", "error")
          last_outcome.update({'status': 'Failed', 'reason': "Unexpected Input Error"})
          session['last_transfer_outcome'] = last_outcome; session.modified = True
-         amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(amount) if amount is not None else Decimal('0.00'))
-         log_failed_attempt(sender_id, receiver_id, amount_for_log, "UNEXPECTED_INPUT_ERR", exception_info=e)
+         amount_for_log = amount if isinstance(amount, Decimal) else Decimal('0.00')
+         # log_failed_attempt(sender_id, receiver_id, amount_for_log, "UNEXPECTED_INPUT_ERR", exception_info=e)
          return redirect(url_for('index'))
 
+    # >>>>> EAVESDROPPER ALERT CODE <<<<<
+    # Input validation has passed. We have valid sender_id, receiver_id, amount, simulate_eve_checked.
+
+    # ---> START: Eavesdropper Simulation Detection & Alerting (Updated Content) <---
+    if simulate_eve_checked:
+        try:
+            # 1. Get IP Address
+            ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+            # Fetch user name if available, otherwise use Unknown
+            user_name = g.user.get('name', 'Unknown')
+            user_id_for_alert = g.user.get('id', 'N/A')
+
+            # 2. Prepare Alert Details
+            alert_subject = "🚨 URGENT: Potential Eavesdropping Detected (Simulated) on QuantumVault Transaction"
+            alert_details_log = (
+                f"User: {user_name} (ID: {user_id_for_alert}), " # Log with name
+                f"IP: {ip_address}, "
+                f"Transfer: {sender_id} -> {receiver_id}, "
+                f"Amount: ₹{amount:.2f}"
+            )
+            email_body = f"""
+QuantumVault Security Alert
+
+WARNING: Potential eavesdropping activity detected during a transaction attempt originating from IP address: {ip_address}
+
+This alert was triggered because the "Simulate Eavesdropper" option was enabled for this transfer. While this is a simulation in the demo, it mimics conditions where real eavesdropping might be occurring.
+
+Activity Details:
+------------------------------
+*   User: {user_name} (ID: {user_id_for_alert})
+*   Source IP: {ip_address}
+*   Action: Fund Transfer Attempt
+*   From Account ID: {sender_id}
+*   To Account ID: {receiver_id}
+*   Amount: ₹{amount:.2f}
+------------------------------
+
+Further QKD steps in this transaction may show a high Quantum Bit Error Rate (QBER) if the simulation proceeds as expected.
+
+Please review this simulated activity.
+
+Thank you,
+QuantumVault Security Monitoring
+"""
+
+            # 3. Log to Server Console
+            # Use the updated subject for logging consistency
+            current_app.logger.warning(f"{alert_subject} - {alert_details_log}")
+
+            # 4. Flash Message to User (Keep this the same or similar)
+            flash_message = (f"⚠️ Security Info: Transfer initiated with 'Simulate Eavesdropper' checked. "
+                             f"Activity logged from IP: {ip_address}. Expect high QBER if QKD proceeds.")
+            flash(flash_message, 'warning')
+
+            # 5. Send Email Alert to Admin
+            admin_email = os.environ.get('ADMIN_ALERT_EMAIL')
+            # Ensure mail system is available and configured
+            if mail and MAIL_AVAILABLE and admin_email:
+                try:
+                    sender_email = app.config.get('MAIL_USERNAME')
+                    if not sender_email:
+                        current_app.logger.error("MAIL_USERNAME not configured. Cannot set email sender.")
+                    else:
+                        # Use configured default sender tuple or construct one
+                        sender_tuple = app.config.get('MAIL_DEFAULT_SENDER', ('QuantumVault Security', sender_email))
+                        msg = Message(alert_subject, # Use new subject
+                                      sender=sender_tuple,
+                                      recipients=[admin_email])
+                        msg.body = email_body # Use new body
+
+                        # Send email directly (simpler for this alert)
+                        mail.send(msg)
+                        current_app.logger.info(f"Eavesdropper simulation email alert sent to {admin_email}")
+
+                        # # --- OR --- If using async (ensure send_async_email is defined):
+                        # thread = Thread(target=send_async_email, args=[current_app.app_context(), msg])
+                        # thread.start()
+                        # current_app.logger.info(f"Eavesdropper simulation email alert queued for background sending to {admin_email}")
+
+                except Exception as mail_err:
+                    # Log error but don't stop the transfer process here
+                    current_app.logger.error(f"Failed to send eavesdropper email alert to {admin_email}: {mail_err}", exc_info=True)
+            elif not admin_email:
+                current_app.logger.warning("ADMIN_ALERT_EMAIL environment variable not set. Skipping email alert.")
+            elif not mail or not MAIL_AVAILABLE:
+                 current_app.logger.warning("Mail system not available/configured. Skipping email alert.")
+
+        except Exception as alert_err:
+            # Log error during alert generation/sending, but don't stop the main transfer flow
+            current_app.logger.error(f"Error during eavesdropper simulation alerting routine: {alert_err}", exc_info=True)
+    # ---> END: Eavesdropper Simulation Detection & Alerting <---
+
+
     # --- 2. QKD Simulation ---
-    qber_thresh = current_app.config['QBER_THRESHOLD']; n_qubits = QKD_NUM_QUBITS; eve_rate = 0.25 if simulate_eve_checked else 0.0
-    qkd_fraud_reason = None # Specific reason if QKD indicates high QBER
+    qber_thresh_pct = app.config.get('QBER_THRESHOLD_PCT', 15) # Use configured percentage
+    qber_thresh = qber_thresh_pct / 100.0 # Convert percentage to decimal for simulation
+    n_qubits = app.config.get('QKD_NUM_QUBITS', 600) # Use configured qubit count
+    eve_rate = 0.25 if simulate_eve_checked else 0.0 # Set Eve interception rate based on checkbox
+    qkd_fraud_reason = None # Specific reason if QKD itself detects high QBER
+
     try:
         log_status = "QKD_RUNNING"
-        logging.info(f"Running QKD simulation: N={n_qubits}, Eve={simulate_eve_checked}, Rate={eve_rate:.2f}, Thresh={qber_thresh:.3f}")
-        # Call the simulation function
+        logging.info(f"Running QKD simulation: N={n_qubits}, Eve={simulate_eve_checked}, Rate={eve_rate}, Thresh={qber_thresh:.3f}")
+        # Ensure simulate_bb84 is defined and imported from qkd_simulation.py
         sim_res = simulate_bb84(n_qubits=n_qubits, simulate_eve=simulate_eve_checked, qber_threshold=qber_thresh, eve_interception_rate=eve_rate)
 
-        # Store result in session and update outcome
-        session[f'last_qkd_log_{logged_in_user_id}'] = sim_res; session.modified = True
+        # Store result in session for potential display/debugging
+        session_key = f'last_qkd_log_{logged_in_user_id}'
+        session[session_key] = sim_res; session.modified = True
         last_outcome['qkd_log_stored'] = True
 
-        # Extract results
         key_bin = sim_res.get('final_key_binary')
-        qber = sim_res.get('qber', -1.0) # Default to -1 if key missing
-        eve_det = sim_res.get('eve_detected', False) # Default to False
-        qber_disp = f"{qber:.4f}" if qber is not None and qber >= 0 else 'N/A'
+        qber = sim_res.get('qber', -1.0) # Default to -1 if missing
+        eve_det = sim_res.get('eve_detected', False) # Check if simulation explicitly detected Eve via QBER
+        qber_disp = f"{qber:.4f}" if qber is not None and qber >= 0 else 'N/A' # Handle None/Negative QBER
         last_outcome['qber'] = qber_disp
-        key_len_bits = len(key_bin or '')
-        logging.info(f"QKD Simulation Result: QBER={qber_disp}, Eve Detected={eve_det}, Key Length={key_len_bits} bits")
+        logging.info(f"QKD Result: QBER={qber_disp}, EveDetected={eve_det}, KeyLen={len(key_bin or '')}")
 
-        # Check QKD failure conditions
-        min_key_len = 128 # Minimum bits required for a reasonable derived key (adjust as needed)
-        if qber < 0: # Indicates simulation error (e.g., insufficient qubits)
-             qkd_fail_reason = f"QKD Simulation Error (Code: {qber}). Check simulation parameters or logs."
-             log_status = "QKD_SIM_ERR"
-        elif eve_det: # QBER exceeded threshold
-             qkd_fail_reason = f"High QBER ({qber_disp}) detected, exceeds threshold ({qber_thresh:.3f}). Potential Eavesdropping."
-             log_status = "QKD_EVE_DETECTED"
-             qkd_fraud_reason = "QKD Security Alert: High Quantum Bit Error Rate detected."
-        elif not key_bin or key_len_bits < min_key_len: # Key too short or missing
-             qkd_fail_reason = f"Generated key is too short ({key_len_bits} bits, requires {min_key_len})."
-             log_status = "QKD_KEY_INSUFFICIENT"
+        # --- Check QKD failure conditions ---
+        min_key_len = 64 # Minimum acceptable key length after sifting/correction
+        if qber is None or qber < 0: # Simulation technical error
+            qkd_fail_reason = f"QKD simulation technical error (QBER: {qber_disp})."
+            log_status = "QKD_SIM_ERR"
+        elif eve_det: # Eve detected based on QBER exceeding threshold
+            qkd_fail_reason = f"High QBER ({qber_disp}) > Threshold ({qber_thresh:.3f}). Eavesdropper likely detected."
+            log_status = "QKD_EVE_DETECTED"
+            qkd_fraud_reason = "QKD Alert: High QBER" # Specific reason for fraud flag
+        elif not key_bin or len(key_bin) < min_key_len: # Key too short or missing
+            qkd_fail_reason = f"Insufficient secure key bits ({len(key_bin or '')}). Minimum required: {min_key_len}."
+            log_status = "QKD_KEY_INSUFFICIENT"
 
-        # Raise error if any failure condition met
-        if qkd_fail_reason:
+        if qkd_fail_reason: # If any failure condition met
             raise ValueError(f"QKD Failed: {qkd_fail_reason}")
 
-        # If successful, derive the Fernet key
-        key_hash = hashlib.sha256(key_bin.encode('utf-8')).digest() # SHA-256 hash (32 bytes)
-        qkd_key = base64.urlsafe_b64encode(key_hash) # Base64 encode for Fernet
-        logging.info(f"QKD successful (QBER:{qber_disp}). Fernet key derived.")
+        # --- QKD Success: Derive Fernet key ---
+        # Use SHA256 hash of the binary key string to get a 256-bit key for Fernet
+        key_hash = hashlib.sha256(key_bin.encode('utf-8')).digest()
+        qkd_key = base64.urlsafe_b64encode(key_hash) # Fernet requires base64 encoded key
+        logging.info(f"QKD OK (QBER:{qber_disp}). Fernet key derived from {len(key_bin)}-bit raw key.")
         log_status = "QKD_SUCCESS"
         last_outcome['qkd_status_msg'] = "Secure Channel OK"
 
-    except ValueError as qkd_e: # Catch specific QKD failures raised above
-        logging.warning(f"QKD Failure during transfer: {qkd_e}")
-        flash(f"Transfer Aborted: {qkd_e}", "danger") # Show specific reason
+    except ValueError as qkd_e: # Catch specific QKD value errors (threshold fail, insufficient key)
+        logging.warning(f"QKD Failure: {qkd_e}")
+        flash(f"Transfer Aborted: {qkd_e}", "danger") # Use 'danger' for security failures
         last_outcome.update({'status': 'Failed', 'reason': qkd_fail_reason or str(qkd_e), 'qkd_status_msg': log_status})
-        log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber >=0 else None, fraud_reason=qkd_fraud_reason, exception_info=qkd_e)
+        # log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber is not None and qber >=0 else None, fraud_reason=qkd_fraud_reason, exception_info=qkd_e)
         session['last_transfer_outcome'] = last_outcome; session.modified = True
         return redirect(url_for('index'))
-    except Exception as qkd_e: # Catch unexpected errors during QKD process
+    except Exception as qkd_e: # Catch unexpected QKD simulation errors
         logging.error(f"Unexpected QKD Simulation Error: {qkd_e}", exc_info=True)
         log_status = "QKD_INTERNAL_ERR"
-        flash('Transfer Aborted: An internal error occurred during secure channel setup.', 'danger')
+        flash('Transfer Aborted: Secure channel establishment encountered an unexpected error.', 'danger')
         last_outcome.update({'status': 'Failed', 'reason': 'QKD Internal Error', 'qkd_status_msg': log_status})
-        log_failed_attempt(sender_id, receiver_id, amount, log_status, exception_info=qkd_e)
+        # log_failed_attempt(sender_id, receiver_id, amount, log_status, exception_info=qkd_e)
         session['last_transfer_outcome'] = last_outcome; session.modified = True
         return redirect(url_for('index'))
 
-    # --- 3. Database Transaction, Fraud Check, and Finalization ---
+
+    # --- 3. Database Transaction & Fraud Check ---
     conn = None; cursor = None; needs_rollback = False; log_id = None
+    # Determine the appropriate DB error type based on current connection priority/availability
+    # This relies on POSTGRES_AVAILABLE and MYSQL_AVAILABLE being set correctly globally
+    db_error_type = psycopg2.Error if POSTGRES_AVAILABLE and psycopg2 else (MySQLError if MYSQL_AVAILABLE and MySQLError else Exception)
+
     try:
-        # Ensure QKD key is present
-        if not qkd_key:
-            raise ValueError("Internal error: QKD key generation failed silently.")
-
+        if not qkd_key: raise ValueError("Internal error: QKD key missing after successful simulation.")
         log_status = "DB_TXN_STARTING"
+        # Ensure get_db_connection is defined and handles PG/MySQL switching
         conn = get_db_connection()
-        if not conn:
-            raise ConnectionError("Database service unavailable. Cannot complete transfer.")
+        if not conn: raise ConnectionError("Database connection failed before transaction.")
 
-        # Use DictCursor for easier data access, potentially named for server-side if needed
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) # Use DictCursor
-        needs_rollback = True # Assume rollback needed until commit
+        # Create cursor (adapt based on connection type)
+        cursor_type_determined = False
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) # Use DictCursor for PG
+             db_type = "PostgreSQL"
+             cursor_type_determined = True
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+             cursor = conn.cursor(dictionary=True, buffered=True) # Use dictionary cursor for MySQL
+             db_type = "MySQL"
+             cursor_type_determined = True
 
-        # --- Lock & Validate Sender Account ---
+        if not cursor_type_determined:
+            raise ConnectionError("Cannot determine cursor type for unknown DB connection.")
+
+        needs_rollback = True # Assume rollback needed unless commit succeeds
+
+        # --- Start Database Transaction (implicit or explicit depending on driver/config) ---
+        # Example for mysql.connector if autocommit is OFF: conn.start_transaction()
+
+        # Lock & Validate Sender Account
         log_status = "DB_VALIDATE_SENDER"
+        # Use %s placeholders compatible with both psycopg2 and mysql.connector
+        # Add 'FOR UPDATE' to lock the row during the transaction
         cursor.execute("SELECT customer_id, balance FROM accounts WHERE account_id = %s FOR UPDATE", (sender_id,))
         sender_info = cursor.fetchone()
-        if not sender_info: raise ValueError(f"Sender account {sender_id} could not be found or locked.")
-        # ** Critical Authorization Check **
-        if sender_info['customer_id'] != logged_in_user_id:
-            logging.critical(f"AUTHORIZATION FAILED: User {logged_in_user_id} attempted transfer from account {sender_id} owned by {sender_info['customer_id']}.")
-            raise ValueError("Authorization Error: You do not own the source account.")
-        sender_bal = Decimal(sender_info['balance'])
-        if sender_bal < amount:
-            raise ValueError(f"Insufficient funds. Your balance is ₹{sender_bal:.2f}, attempted transfer of ₹{amount:.2f}.")
+        if not sender_info: raise ValueError(f"Sender account {sender_id} not found in database.")
+        # Ensure keys match DictCursor (lowercase) or dictionary=True cursor
+        sender_db_cust_id = sender_info.get('customer_id')
+        sender_db_balance = sender_info.get('balance')
+        if sender_db_cust_id is None or sender_db_balance is None:
+            raise ValueError("Incomplete sender account data retrieved.")
+        if sender_db_cust_id != logged_in_user_id:
+            logging.critical(f"AUTHORIZATION FAILED: Logged in user {logged_in_user_id} attempted to use account {sender_id} belonging to user {sender_db_cust_id}.")
+            raise ValueError("Authorization Error: Account does not belong to logged-in user.")
+        try:
+             sender_bal = Decimal(sender_db_balance)
+        except InvalidOperation:
+             raise ValueError(f"Invalid balance format for sender account {sender_id}.")
+        if sender_bal < amount: raise ValueError(f"Insufficient funds. Your balance: ₹{sender_bal:.2f}")
 
-        # --- Validate Receiver Account ---
+        # Validate Receiver Account
         log_status = "DB_VALIDATE_RECEIVER"
         cursor.execute("SELECT a.account_id, c.customer_name, a.balance FROM accounts a JOIN customers c ON a.customer_id=c.customer_id WHERE a.account_id=%s", (receiver_id,))
         rx_info = cursor.fetchone()
         if not rx_info: raise ValueError(f"Receiver account {receiver_id} not found.")
-        rx_name = rx_info['customer_name']
-        last_outcome['receiver_name'] = rx_name # Store receiver name for outcome display
+        rx_name = rx_info.get('customer_name', 'Unknown Receiver')
+        rx_balance_raw = rx_info.get('balance') # Get receiver balance for update step
+        if rx_balance_raw is None: raise ValueError("Receiver balance data missing.")
+        try:
+             rx_balance = Decimal(rx_balance_raw)
+        except InvalidOperation:
+             raise ValueError(f"Invalid balance format for receiver account {receiver_id}.")
+        last_outcome['receiver_name'] = rx_name
 
         # --- Fraud Detection ---
         log_status = "FRAUD_CHECK_RUNNING"
-        logging.info("Running fraud detection analysis...")
-        hist_ml = [] # Initialize history list
-        try: # Fetch history safely
-            sql_history = "SELECT amount, timestamp FROM qkd_transaction_log WHERE sender_account_id=%s AND qkd_status NOT LIKE '%%FAIL%%' AND qkd_status NOT LIKE '%%ERR%%' ORDER BY timestamp DESC LIMIT 10"
-            cursor.execute(sql_history, (sender_id,))
-            history_raw = cursor.fetchall()
-            for r in history_raw:
-                 try:
-                     if r['amount'] is not None and isinstance(r['timestamp'], datetime.datetime):
-                         hist_ml.append({'amount': Decimal(r['amount']), 'timestamp': r['timestamp']})
-                 except (InvalidOperation, TypeError, ValueError) as hist_e: logging.warning(f"Skipping history record processing: {hist_e} - {r}")
-        except DBError as db_hist_err: logging.error(f"DB Error fetching history for fraud check: {db_hist_err}"); flash("Warning: Error retrieving history for fraud check.", "warning")
-        except Exception as e_hist: logging.error(f"Unexpected error fetching history: {e_hist}", exc_info=True); flash("Warning: Error preparing fraud check.", "warning")
+        logging.info("Running fraud check...")
+        hist_ml = [] # List to hold history data for ML model
+        try:
+            # Fetch recent transaction history (non-failed) for sender
+            # Use appropriate wildcard (% for MySQL, % for psycopg2 with LIKE)
+            # Assuming %s works for parameter substitution in LIKE for both
+            hist_sql = """
+                SELECT amount, timestamp FROM qkd_transaction_log
+                WHERE sender_account_id=%s
+                AND qkd_status NOT LIKE %s AND qkd_status NOT LIKE %s
+                ORDER BY timestamp DESC LIMIT 10
+            """
+            cursor.execute(hist_sql, (sender_id, '%FAIL%', '%ERROR%'))
+            hist_raw = cursor.fetchall()
+            for r in hist_raw:
+                 try: # Inner try for processing each history record
+                     amount_val = r.get('amount')
+                     ts_val = r.get('timestamp')
+                     # Ensure data is valid before appending
+                     if amount_val is not None and isinstance(ts_val, datetime.datetime):
+                         hist_ml.append({'amount': Decimal(amount_val), 'timestamp': ts_val})
+                 except (TypeError, InvalidOperation, ValueError) as hist_e:
+                     logging.warning(f"Skipping history record due to processing error: {hist_e} - Record: {r}")
+        except db_error_type as db_hist_err: # Catch specific DB error type
+             logging.error(f"DB Error fetching transaction history for fraud check: {db_hist_err}", exc_info=True)
+             flash("Warning: Could not retrieve full history for fraud check.", "warning") # Inform user
+        except Exception as db_hist_err_other: # Catch any other error during history fetch
+            logging.error(f"Unexpected error fetching transaction history for fraud check: {db_hist_err_other}", exc_info=True)
+            flash("Warning: Error retrieving history for fraud check.", "warning")
 
-        # Prepare data and call fraud detection function
-        current_txn_data = {'amount': amount, 'recipient_username': rx_name, 'timestamp': datetime.datetime.now()}
-        fraud_cfg = {'blacklist': app.config['FRAUD_BLACKLIST']}
-        try: fraud_res = detect_fraud(current_txn_data, hist_ml, **fraud_cfg)
-        except Exception as fraud_ml_err: logging.error(f"ML Fraud detection call failed: {fraud_ml_err}", exc_info=True); fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check Error', 'ml_score': -1}; flash("Warning: Fraud check error.", "warning")
+        # Prepare current transaction data for fraud detection
+        # Ensure fraud_detection module provides necessary defaults if features are missing
+        curr_txn_features = {
+             'amount': float(amount), # ML model likely expects float
+             'recipient_username': rx_name,
+             'timestamp': datetime.datetime.now(),
+             'sender_account_id': sender_id, # Add potentially useful features
+             'receiver_account_id': receiver_id,
+             # Add defaults for features potentially missing from basic input
+             # These should match defaults in your fraud_detection logic/model training
+             'location_risk': 0.5, # Example default
+             'transaction_type': 'TRANSFER' # Example default
+         }
+        # Load fraud config/blacklist if needed from app context
+        fraud_cfg = {'blacklist': app.config.get('FRAUD_BLACKLIST', set())}
+        try:
+            # Ensure detect_fraud is defined and imported from fraud_detection.py
+            # Pass the prepared feature dictionary
+            fraud_res = detect_fraud(curr_txn_features, hist_ml, **fraud_cfg)
+        except Exception as fraud_detect_err:
+            logging.error(f"Fraud detection call failed: {fraud_detect_err}", exc_info=True)
+            # Default to non-fraudulent but log error, potentially flash warning
+            fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check System Error', 'ml_score': -1.0}
+            flash("Warning: Fraud check system encountered an error.", "warning")
 
-        # Process fraud results and combine with QKD alert status
         last_outcome['fraud_check'] = fraud_res
-        is_fraudulent_ml = fraud_res.get('is_fraudulent', False)
+        is_fraudulent = fraud_res.get('is_fraudulent', False)
         ml_fraud_reason = fraud_res.get('reason')
-        final_fraud_reason = qkd_fraud_reason # QKD reason takes precedence
-        if is_fraudulent_ml:
-             if not final_fraud_reason: final_fraud_reason = ml_fraud_reason
-             elif ml_fraud_reason and ml_fraud_reason != qkd_fraud_reason: final_fraud_reason += f"; {ml_fraud_reason}"
-        final_is_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml # Flagged if QKD alert OR fraud detected
-        if final_is_flagged: logging.warning(f"ALERT: {final_fraud_reason}")
-        else: logging.info("Fraud check passed and no QKD alert.")
-        qkd_status_final = "SECURED_FLAGGED" if final_is_flagged else "SECURED"
+        # Combine fraud reasons: QKD reason takes precedence if QKD detected fraud
+        final_fraud_reason = qkd_fraud_reason or ml_fraud_reason if is_fraudulent else None
+        if is_fraudulent: logging.warning(f"FRAUD ALERT DETECTED: {final_fraud_reason}")
+        else: logging.info("Fraud check passed or no fraud detected.")
+
+        # Determine final QKD status string based on fraud outcome
+        qkd_status_final = "SECURED_FLAGGED" if is_fraudulent else "SECURED"
         last_outcome['qkd_status_msg'] = qkd_status_final.replace('_',' ')
 
-        # --- Encrypt Confirmation Details ---
+        # --- Encrypt Confirmation Data ---
         log_status = "ENCRYPTING_DATA"
-        msg_to_encrypt = f"CONF;{sender_id}>{receiver_id};AMT:{amount:.2f};QBER:{qber_disp};FLAGGED:{final_is_flagged};R:{final_fraud_reason or 'N/A'};T:{datetime.datetime.now().isoformat()}"
+        # Create a structured message for encryption
+        msg_to_encrypt = (f"CONF;TxnTime:{datetime.datetime.now().isoformat(timespec='seconds')};"
+                          f"From:{sender_id};To:{receiver_id};Amt:{amount:.2f};"
+                          f"QBER:{qber_disp};Fraud:{is_fraudulent};"
+                          f"Reason:{final_fraud_reason or 'N/A'}")
         try:
-            fernet_cipher = Fernet(qkd_key)
-            enc_b64 = fernet_cipher.encrypt(msg_to_encrypt.encode('utf-8')).decode('utf-8')
-            last_outcome['enc_sample'] = enc_b64[:60]+'...' # Sample for outcome display
-        except InvalidToken: log_status = "ENC_KEY_ERR"; raise ValueError("Internal error: Invalid encryption key.")
-        except Exception as fe: log_status = "ENC_FAIL"; raise ValueError(f"Internal error: Encryption failed: {fe}")
+            f = Fernet(qkd_key) # Assumes qkd_key is valid bytes
+            # Encrypt the message and decode to UTF-8 for storing in DB text field
+            enc_b64 = f.encrypt(msg_to_encrypt.encode('utf-8')).decode('utf-8')
+            last_outcome['enc_sample'] = enc_b64[:60]+'...' # Sample for display/session
+        except InvalidToken: # Specific error if the key is invalid
+            log_status = "ENC_KEY_ERR"; raise ValueError("Internal key error during encryption (InvalidToken).")
+        except Exception as fe: # Catch any other encryption error
+            log_status = "ENC_FAIL"; raise ValueError(f"Encryption failed: {fe}")
 
         # --- Update Account Balances ---
         log_status = "DB_UPDATING_BALANCES"
         new_sender_bal = sender_bal - amount
-        # Lock receiver row for update before calculating new balance
+        # Lock receiver row FOR UPDATE before calculating new balance to prevent race conditions
         cursor.execute("SELECT balance FROM accounts WHERE account_id=%s FOR UPDATE", (receiver_id,))
         rx_bal_row_locked = cursor.fetchone()
-        if not rx_bal_row_locked: raise ValueError(f"Receiver account {receiver_id} disappeared before balance update.")
-        new_receiver_bal = Decimal(rx_bal_row_locked['balance']) + amount
+        if not rx_bal_row_locked: raise ValueError("Receiver account disappeared during transaction.")
+        # Ensure balance key exists and is valid
+        current_rx_balance_raw = rx_bal_row_locked.get('balance')
+        if current_rx_balance_raw is None: raise ValueError("Could not retrieve receiver balance for update.")
+        try:
+             current_rx_balance = Decimal(current_rx_balance_raw)
+        except InvalidOperation:
+             raise ValueError(f"Invalid balance format for receiver account {receiver_id} during update.")
+        new_receiver_bal = current_rx_balance + amount
 
         # Execute balance updates
-        cursor.execute("UPDATE accounts SET balance=%s WHERE account_id=%s", (str(new_sender_bal), sender_id))
-        if cursor.rowcount != 1: raise DBError(f"Sender balance update failed (rows={cursor.rowcount})")
-        cursor.execute("UPDATE accounts SET balance=%s WHERE account_id=%s", (str(new_receiver_bal), receiver_id))
-        if cursor.rowcount != 1: raise DBError(f"Receiver balance update failed (rows={cursor.rowcount})")
-        logging.info("Account balances updated successfully.")
+        cursor.execute("UPDATE accounts SET balance=%s WHERE account_id=%s", (new_sender_bal, sender_id))
+        if cursor.rowcount != 1: raise db_error_type(f"Sender balance update failed (Expected 1 row modified, got {cursor.rowcount})")
+        cursor.execute("UPDATE accounts SET balance=%s WHERE account_id=%s", (new_receiver_bal, receiver_id))
+        if cursor.rowcount != 1: raise db_error_type(f"Receiver balance update failed (Expected 1 row modified, got {cursor.rowcount})")
 
-        # --- Log Successful Transaction ---
+        # --- Log Transaction to Database ---
         log_status = "DB_LOGGING_TXN"
-        log_sql = """
-            INSERT INTO qkd_transaction_log (
-                sender_account_id, receiver_account_id, amount, qkd_status,
-                encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason,
-                timestamp
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING log_id
-            """ # Use RETURNING for PostgreSQL
         log_qber_val = qber if qber is not None and qber >= 0 else None
-        log_fraud_reason_val = final_fraud_reason[:255] if final_fraud_reason else None # Truncate reason
-        log_values = (
-            sender_id, receiver_id, str(amount), qkd_status_final, enc_b64, None, # iv is NULL
-            log_qber_val, final_is_flagged, log_fraud_reason_val, datetime.datetime.now()
-        )
-        cursor.execute(log_sql, log_values)
-        # Fetch the returned log_id
-        log_row = cursor.fetchone()
-        if log_row and len(log_row) > 0:
-             log_id = log_row[0] # Or log_row['log_id'] if using DictCursor consistently
+        log_fraud_reason_val = final_fraud_reason[:255] if final_fraud_reason else None # Truncate if needed
+        log_timestamp = datetime.datetime.now()
+
+        # Adapt SQL for PostgreSQL (RETURNING) vs MySQL (no RETURNING, use lastrowid)
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            log_sql = """
+                INSERT INTO qkd_transaction_log
+                (sender_account_id, receiver_account_id, amount, qkd_status,
+                 encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, "timestamp")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING log_id
+            """ # Note: timestamp column name quoted for PG
+            log_values = (
+                sender_id, receiver_id, amount, qkd_status_final,
+                enc_b64, None, # iv is None as Fernet includes it
+                log_qber_val, is_fraudulent, log_fraud_reason_val, log_timestamp
+            )
+            cursor.execute(log_sql, log_values)
+            log_id_row = cursor.fetchone() # Fetch the returned ID
+            if not log_id_row or 'log_id' not in log_id_row:
+                raise db_error_type("Failed to get log ID after insert using RETURNING.")
+            log_id = log_id_row['log_id']
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            log_sql = """
+                INSERT INTO qkd_transaction_log
+                (sender_account_id, receiver_account_id, amount, qkd_status,
+                 encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            log_values = (
+                sender_id, receiver_id, amount, qkd_status_final,
+                enc_b64, None, # iv is None as Fernet includes it
+                log_qber_val, is_fraudulent, log_fraud_reason_val, log_timestamp
+            )
+            cursor.execute(log_sql, log_values)
+            log_id = cursor.lastrowid # Get last inserted ID for MySQL
+            if not log_id:
+                 raise db_error_type("Failed to get log ID after insert (lastrowid).")
         else:
-             raise DBError("Failed to retrieve log ID after insert using RETURNING.")
-        last_outcome['log_id'] = log_id
-        logging.info(f"Transaction successfully logged with ID: {log_id}")
+            raise ConnectionError("Cannot log transaction: Unsupported database connection type.")
+
+        last_outcome['log_id'] = log_id; logging.info(f"Transaction logged successfully: ID={log_id}")
 
         # --- Commit Transaction ---
         log_status = "DB_COMMITTING"
         conn.commit()
         needs_rollback = False # Commit successful, no rollback needed
-        logging.info("Database transaction committed successfully.")
-        last_outcome['status'] = 'Success' # Set final outcome
+        logging.info("DB transaction committed successfully.")
+        last_outcome['status'] = 'Success'
+
+        # --- Flash Success Message ---
+        flash_msg = f"Success! ₹{amount:.2f} sent to {rx_name}. Log ID: {log_id}. Status: {qkd_status_final.replace('_',' ')} (QBER:{qber_disp})."
+        flash_cat = "success" # Use 'success' category
+        if is_fraudulent:
+            short_r = (final_fraud_reason or 'Flagged').split(':')[0] # Show first part of reason
+            flash_msg = f"Success (Log ID: {log_id}), but transfer FLAGGED: {short_r}. QBER: {qber_disp}. Sent ₹{amount:.2f} to {rx_name}."
+            flash_cat = "warning" # Use 'warning' category for flagged success
+        flash(flash_msg, flash_cat) # Ensure base.html styles 'success' and 'warning'
+
+    # --- Error Handling for DB Transaction Block ---
+    except (ValueError, ConnectionError, InvalidOperation, AssertionError, InvalidToken) as e:
+        # Catch non-DB specific errors first (validation, config, encryption key)
+        if isinstance(e, ValueError): log_status = "VALIDATION_FAIL_DB"
+        elif isinstance(e, ConnectionError): log_status = "DB_CONN_ERR_PRE_TXN" # Connection failed before query
+        elif isinstance(e, InvalidToken): log_status = "ENC_KEY_ERR_FINAL"
+        else: log_status = "ASSERT_INVALID_OP_ERR" # Catch others
+
+        error_message = str(e)
+        logging.error(f"Transaction Error during DB/Fraud/Encrypt ({log_status}): {error_message}", exc_info=True)
+        last_outcome.update({'status': 'Failed', 'reason': error_message[:200], 'qkd_status_msg': log_status.replace('_',' ')})
+        # Provide user-friendly error message
+        if log_status == "VALIDATION_FAIL_DB": flash(f"Transfer Failed: {error_message}", "error") # Show specific validation errors
+        else: flash("Transfer Failed due to a system processing error.", "error") # Generic for others
+
+        # Log failed attempt (ensure log_failed_attempt is defined)
+        # log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber is not None and qber >=0 else None, fraud_reason=f"Txn Error: {error_message[:100]}", exception_info=e)
+
+    except db_error_type as db_err: # Catch specific DB errors (PG or MySQL)
+         log_status = "DB_TXN_ERR"
+         error_message = f"Database Error: {db_err}"
+         logging.error(f"Transaction Error ({log_status}): {error_message}", exc_info=True)
+         last_outcome.update({'status': 'Failed', 'reason': f"Database Error: {str(db_err)[:150]}", 'qkd_status_msg': log_status})
+         flash("Transfer Failed due to a database error.", "error")
+         # log_failed_attempt(...)
+
+    except Exception as e: # Catch truly unexpected errors during transaction phase
+        log_status = "UNEXPECTED_TXN_ERR"
+        error_message = str(e)
+        # Use traceback.format_exc() for detailed traceback logging
+        exc_info = traceback.format_exc()
+        logging.critical(f"CRITICAL UNEXPECTED Error during transfer transaction: {error_message}\nTraceback:\n{exc_info}")
+        flash("Transfer Failed due to a critical unexpected system error.", "danger") # Use 'danger' category
+        last_outcome.update({'status': 'Failed', 'reason': 'Critical Unexpected Error', 'qkd_status_msg': log_status})
+        # log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber is not None and qber >=0 else None, fraud_reason="Critical Unexpected Error", exception_info=e)
+
+    finally: # Cleanup for the main transaction block
+        if conn: # Check if connection object exists
+            if needs_rollback:
+                try:
+                    conn.rollback()
+                    logging.warning(f"Transfer transaction rolled back (Final Status: {log_status}).")
+                except Exception as rb_err: # Catch generic error during rollback
+                    logging.error(f"Rollback failed during transfer error handling: {rb_err}", exc_info=True)
+            if cursor:
+                 try: cursor.close()
+                 except Exception: pass # Ignore cursor close errors
+            # Ensure close_db_connection is defined and handles errors safely
+            close_db_connection(conn)
+            logging.debug("DB connection closed in transfer_funds finally block.")
+
+    # --- Store outcome in session and redirect ---
+    session['last_transfer_outcome'] = last_outcome
+    session.modified = True # Explicitly mark session as modified
+    return redirect(url_for('index')) # Redirect to dashboard/index page
+
+
+    # --- 3. Database Transaction & Fraud Check ---
+    conn = None; cursor = None; needs_rollback = False; log_id = None
+    db_error_type = psycopg2.Error if POSTGRES_AVAILABLE else (MySQLError if MYSQL_AVAILABLE else Exception) # Prioritize PG Error
+
+    try:
+        if not qkd_key: raise ValueError("Internal error: QKD key missing after successful simulation.")
+        log_status = "DB_TXN_STARTING"
+        # Ensure get_db_connection is defined and handles PG/MySQL switching
+        conn = get_db_connection()
+        if not conn: raise ConnectionError("Database connection failed before transaction.")
+
+        # Create cursor (adapt based on connection type)
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            cursor = conn.cursor(dictionary=True) # No buffer needed for SELECT
+        else:
+            raise ConnectionError("Cannot determine cursor type for history.")
+
+        needs_rollback = True # Assume rollback needed unless commit succeeds
+
+        # --- Start Database Transaction ---
+        # PostgreSQL: Transactions start implicitly. Use COMMIT/ROLLBACK.
+        # MySQL (mysql.connector): Use conn.start_transaction() if autocommit is off, then COMMIT/ROLLBACK. Assume implicit for now.
+
+        # Lock & Validate Sender Account
+        log_status = "DB_VALIDATE_SENDER"
+        # Use %s placeholders for both PG and MySQL connector
+        cursor.execute("SELECT customer_id, balance FROM accounts WHERE account_id = %s FOR UPDATE", (sender_id,))
+        sender_info = cursor.fetchone()
+        if not sender_info: raise ValueError(f"Sender account {sender_id} not found in database.")
+        # Ensure keys match DictCursor (lowercase) or dictionary=True cursor
+        sender_db_cust_id = sender_info.get('customer_id')
+        sender_db_balance = sender_info.get('balance')
+        if sender_db_cust_id is None or sender_db_balance is None:
+            raise ValueError("Incomplete sender account data retrieved.")
+        if sender_db_cust_id != logged_in_user_id:
+            logging.critical(f"AUTHORIZATION FAILED: Logged in user {logged_in_user_id} attempted to use account {sender_id} belonging to user {sender_db_cust_id}.")
+            raise ValueError("Authorization Error: Account does not belong to logged-in user.")
+        sender_bal = Decimal(sender_db_balance)
+        if sender_bal < amount: raise ValueError(f"Insufficient funds. Your balance: ₹{sender_bal:.2f}")
+
+        # Validate Receiver Account
+        log_status = "DB_VALIDATE_RECEIVER"
+        cursor.execute("SELECT a.account_id, c.customer_name, a.balance FROM accounts a JOIN customers c ON a.customer_id=c.customer_id WHERE a.account_id=%s", (receiver_id,))
+        rx_info = cursor.fetchone()
+        if not rx_info: raise ValueError(f"Receiver account {receiver_id} not found.")
+        rx_name = rx_info.get('customer_name', 'Unknown Receiver')
+        rx_balance = rx_info.get('balance') # Get receiver balance for update step
+        if rx_balance is None: raise ValueError("Receiver balance data missing.")
+        last_outcome['receiver_name'] = rx_name
+
+        # --- Fraud Detection ---
+        log_status = "FRAUD_CHECK_RUNNING"
+        logging.info("Running fraud check...")
+        hist_ml = [] # List to hold history data for ML model
+        try:
+            # Fetch recent transaction history (non-failed) for sender
+            hist_sql = """
+                SELECT amount, timestamp FROM qkd_transaction_log
+                WHERE sender_account_id=%s
+                AND qkd_status NOT LIKE %s AND qkd_status NOT LIKE %s
+                ORDER BY timestamp DESC LIMIT 10
+            """
+            cursor.execute(hist_sql, (sender_id, '%FAIL%', '%ERROR%'))
+            hist_raw = cursor.fetchall()
+            for r in hist_raw:
+                 try: # Inner try for processing each history record
+                     amount_val = r.get('amount')
+                     ts_val = r.get('timestamp')
+                     # Ensure data is valid before appending
+                     if amount_val is not None and isinstance(ts_val, datetime.datetime):
+                         hist_ml.append({'amount': Decimal(amount_val), 'timestamp': ts_val})
+                 except (TypeError, InvalidOperation, ValueError) as hist_e:
+                     logging.warning(f"Skipping history record due to processing error: {hist_e} - Record: {r}")
+        except db_error_type as db_hist_err: # Catch specific DB error type
+             logging.error(f"DB Error fetching transaction history for fraud check: {db_hist_err}", exc_info=True)
+             flash("Warning: Could not retrieve full history for fraud check.", "warning") # Inform user
+        except Exception as db_hist_err_other: # Catch any other error during history fetch
+            logging.error(f"Unexpected error fetching transaction history for fraud check: {db_hist_err_other}", exc_info=True)
+            flash("Warning: Error retrieving history for fraud check.", "warning")
+
+        # Prepare current transaction data
+        curr_txn = {'amount': amount, 'recipient_username': rx_name, 'timestamp': datetime.datetime.now()}
+        # Load fraud config/blacklist if needed
+        fraud_cfg = {'blacklist': app.config.get('FRAUD_BLACKLIST', set())}
+        try:
+            # Ensure detect_fraud is defined and imported
+            fraud_res = detect_fraud(curr_txn, hist_ml, **fraud_cfg)
+        except Exception as fraud_ml_err:
+            logging.error(f"ML Fraud detection call failed: {fraud_ml_err}", exc_info=True)
+            # Default to non-fraudulent but log error, potentially flash warning
+            fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check System Error', 'ml_score': -1}
+            flash("Warning: Fraud check system encountered an error.", "warning")
+
+        last_outcome['fraud_check'] = fraud_res
+        is_fraudulent = fraud_res.get('is_fraudulent', False)
+        ml_fraud_reason = fraud_res.get('reason')
+        # Combine fraud reasons: QKD reason takes precedence if QKD detected fraud
+        final_fraud_reason = qkd_fraud_reason or ml_fraud_reason if is_fraudulent else None
+        if is_fraudulent: logging.warning(f"FRAUD ALERT DETECTED: {final_fraud_reason}")
+        else: logging.info("Fraud check passed or no fraud detected.")
+
+        # Determine final QKD status string based on fraud outcome
+        qkd_status_final = "SECURED_FLAGGED" if is_fraudulent else "SECURED"
+        last_outcome['qkd_status_msg'] = qkd_status_final.replace('_',' ')
+
+        # --- Encrypt Confirmation Data ---
+        log_status = "ENCRYPTING_DATA"
+        # Create a structured message for encryption
+        msg_to_encrypt = (f"CONF;TxnTime:{datetime.datetime.now().isoformat()};"
+                          f"From:{sender_id};To:{receiver_id};Amt:{amount:.2f};"
+                          f"QBER:{qber_disp};Fraud:{is_fraudulent};"
+                          f"Reason:{final_fraud_reason or 'N/A'}")
+        try:
+            f = Fernet(qkd_key)
+            # Encrypt the message and decode to UTF-8 for storing in DB text field
+            enc_b64 = f.encrypt(msg_to_encrypt.encode('utf-8')).decode('utf-8')
+            last_outcome['enc_sample'] = enc_b64[:60]+'...' # Sample for display/session
+        except InvalidToken: # Specific error if the key is invalid
+            log_status = "ENC_KEY_ERR"; raise ValueError("Internal key error during encryption (InvalidToken).")
+        except Exception as fe: # Catch any other encryption error
+            log_status = "ENC_FAIL"; raise ValueError(f"Encryption failed: {fe}")
+
+        # --- Update Account Balances ---
+        log_status = "DB_UPDATING_BALANCES"
+        new_sender_bal = sender_bal - amount
+        # Lock receiver row FOR UPDATE before calculating new balance to prevent race conditions
+        cursor.execute("SELECT balance FROM accounts WHERE account_id=%s FOR UPDATE", (receiver_id,))
+        rx_bal_row_locked = cursor.fetchone()
+        if not rx_bal_row_locked: raise ValueError("Receiver account disappeared during transaction.")
+        # Ensure balance key exists and is valid
+        current_rx_balance = rx_bal_row_locked.get('balance')
+        if current_rx_balance is None: raise ValueError("Could not retrieve receiver balance for update.")
+        new_receiver_bal = Decimal(current_rx_balance) + amount
+
+        # Execute balance updates
+        cursor.execute("UPDATE accounts SET balance=%s WHERE account_id=%s", (new_sender_bal, sender_id))
+        if cursor.rowcount != 1: raise db_error_type(f"Sender balance update failed (Expected 1 row modified, got {cursor.rowcount})") # Use DB-specific error
+        cursor.execute("UPDATE accounts SET balance=%s WHERE account_id=%s", (new_receiver_bal, receiver_id))
+        if cursor.rowcount != 1: raise db_error_type(f"Receiver balance update failed (Expected 1 row modified, got {cursor.rowcount})") # Use DB-specific error
+
+        # --- Log Transaction to Database ---
+        log_status = "DB_LOGGING_TXN"
+        log_qber_val = qber if qber is not None and qber >= 0 else None
+        log_fraud_reason_val = final_fraud_reason[:255] if final_fraud_reason else None # Truncate if needed
+        log_timestamp = datetime.datetime.now()
+
+        # Adapt SQL for PostgreSQL (RETURNING) vs MySQL (no RETURNING, use lastrowid)
+        # Use the correctly defined db_error_type from earlier in the function
+        # Ensure db_error_type = psycopg2.Error if POSTGRES_AVAILABLE else ... definition exists earlier
+
+        # --- CORRECTED TYPO HERE ---
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            log_sql = """
+                INSERT INTO qkd_transaction_log
+                (sender_account_id, receiver_account_id, amount, qkd_status,
+                 encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, "timestamp")
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING log_id
+            """ # Note: Ensure timestamp column name is quoted if it's a reserved word in PG
+            log_values = (
+                sender_id, receiver_id, amount, qkd_status_final,
+                enc_b64, None, # iv is None as Fernet includes it
+                log_qber_val, is_fraudulent, log_fraud_reason_val, log_timestamp
+            )
+            cursor.execute(log_sql, log_values)
+            log_id_row = cursor.fetchone() # Fetch the returned ID
+            if not log_id_row or 'log_id' not in log_id_row:
+                # Raise the appropriate error type determined earlier
+                raise db_error_type("Failed to get log ID after insert using RETURNING.")
+            log_id = log_id_row['log_id']
+        # --- MYSQL Check (was likely already correct) ---
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            log_sql = """
+                INSERT INTO qkd_transaction_log
+                (sender_account_id, receiver_account_id, amount, qkd_status,
+                 encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """ # MySQL typically doesn't need timestamp quoted unless configured strangely
+            log_values = (
+                sender_id, receiver_id, amount, qkd_status_final,
+                enc_b64, None, # iv is None as Fernet includes it
+                log_qber_val, is_fraudulent, log_fraud_reason_val, log_timestamp
+            )
+            cursor.execute(log_sql, log_values)
+            log_id = cursor.lastrowid # Get last inserted ID for MySQL
+            if not log_id:
+                # Raise the appropriate error type determined earlier
+                raise db_error_type("Failed to get log ID after insert (lastrowid).")
+        else:
+            raise ConnectionError("Cannot log transaction: Unsupported database connection type.")
+
+        last_outcome['log_id'] = log_id
+        logging.info(f"Transaction logged successfully: ID={log_id}")
+
+        # --- Commit Transaction ---
+        log_status = "DB_COMMITTING"
+        conn.commit()
+        needs_rollback = False # Commit successful, no rollback needed
+        logging.info("DB transaction committed successfully.")
+        last_outcome['status'] = 'Success'
 
         # --- Flash Success Message ---
         flash_msg = f"Success! ₹{amount:.2f} sent. Log ID: {log_id}. Status: {qkd_status_final.replace('_',' ')} (QBER:{qber_disp})."
-        flash_cat = "success"
-        if final_is_flagged:
-            short_reason = (final_fraud_reason or 'Flagged').split(';')[0]
-            flash_msg = f"Success (Log ID: {log_id}), but transfer FLAGGED: {short_reason}. QBER: {qber_disp}."
-            flash_cat = "warning"
-        flash(flash_msg, flash_cat)
+        flash_cat = "success" # Use 'success' category
+        if is_fraudulent:
+            short_r = (final_fraud_reason or 'Flagged').split(':')[0] # Show first part of reason
+            flash_msg = f"Success (Log ID: {log_id}), but transfer FLAGGED: {short_r}. QBER: {qber_disp}."
+            flash_cat = "warning" # Use 'warning' category for flagged success
+        flash(flash_msg, flash_cat) # Ensure base.html styles 'success' and 'warning'
 
-    # --- Exception Handling for the Main Transaction Block ---
-    except (DBError, ValueError, InvalidOperation, ConnectionError, AssertionError) as e: # Catch specific errors
+    # --- Error Handling for DB Transaction Block ---
+    except (ValueError, ConnectionError, InvalidOperation, AssertionError, InvalidToken) as e:
+        # Catch non-DB specific errors first (validation, config, encryption key)
+        if isinstance(e, ValueError): log_status = "VALIDATION_FAIL_DB"
+        elif isinstance(e, ConnectionError): log_status = "DB_CONN_ERR_PRE_TXN" # Connection failed before query
+        elif isinstance(e, InvalidToken): log_status = "ENC_KEY_ERR_FINAL"
+        else: log_status = "ASSERT_INVALID_OP_ERR" # Catch others
+
         error_message = str(e)
-        # Determine failure status code if not already set by QKD/Encryption
-        if log_status.startswith("DB_") or log_status in ["INITIATED", "FRAUD_CHECK_RUNNING", "ENCRYPTING_DATA"]:
-            if isinstance(e, (ValueError, AssertionError)): log_status = "VALIDATION_FAIL"
-            elif isinstance(e, ConnectionError): log_status = "DB_CONN_ERR"
-            elif isinstance(e, DBError): log_status = "DB_TXN_ERR"
-            else: log_status = "UNKNOWN_TXN_FAIL"
-        logging.error(f"Transaction Error ({log_status}) during transfer {sender_id}->{receiver_id}: {error_message}", exc_info=True)
+        logging.error(f"Transaction Error during DB/Fraud/Encrypt ({log_status}): {error_message}", exc_info=True)
         last_outcome.update({'status': 'Failed', 'reason': error_message[:200], 'qkd_status_msg': log_status.replace('_',' ')})
-        flash(f"Transfer Failed: {error_message}" if log_status == "VALIDATION_FAIL" else "Transfer Failed due to a system error.", "error")
-        log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber >=0 else None, fraud_reason=f"Txn Error: {error_message[:100]}", exception_info=e)
+        # Provide user-friendly error message
+        if log_status == "VALIDATION_FAIL_DB": flash(f"Transfer Failed: {error_message}", "error") # Show specific validation errors
+        else: flash("Transfer Failed due to a system processing error.", "error") # Generic for others
 
-    except Exception as e: # Catch any other unexpected errors
-        log_status = "UNEXPECTED_TXN_ERR"; error_message = str(e)
-        logging.critical(f"CRITICAL UNEXPECTED Error during transfer {sender_id}->{receiver_id}: {error_message}", exc_info=True)
-        flash("Transfer Failed due to a critical unexpected error.", "danger")
+        # Log failed attempt (ensure log_failed_attempt is defined)
+        # log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber is not None and qber >=0 else None, fraud_reason=f"Txn Error: {error_message[:100]}", exception_info=e)
+
+    except psycopg2.Error as pg_err:
+         # Catch PostgreSQL specific errors if PG is available
+         log_status = "DB_TXN_ERR_PG"
+         error_message = f"PostgreSQL Error: {pg_err}"
+         logging.error(f"Transaction Error ({log_status}): {error_message}", exc_info=True)
+         last_outcome.update({'status': 'Failed', 'reason': f"Database Error: {str(pg_err)[:150]}", 'qkd_status_msg': log_status})
+         flash("Transfer Failed due to a database error.", "error")
+         # log_failed_attempt(...)
+
+    except MySQLError as mysql_err:
+        # Catch MySQL specific errors ONLY if MySQL is available
+        if MYSQL_AVAILABLE:
+            log_status = "DB_TXN_ERR_MYSQL"
+            error_message = f"MySQL Error: {mysql_err}"
+            logging.error(f"Transaction Error ({log_status}): {error_message}", exc_info=True)
+            last_outcome.update({'status': 'Failed', 'reason': f"Database Error: {str(mysql_err)[:150]}", 'qkd_status_msg': log_status})
+            flash("Transfer Failed due to a database error.", "error")
+            # log_failed_attempt(...)
+        else:
+            # If MySQL isn't available, this shouldn't happen, but log if it does
+             logging.error(f"Caught MySQLError but MySQL is not marked as available: {mysql_err}", exc_info=True)
+             # Treat as unexpected error
+             log_status = "UNEXPECTED_DB_ERR"
+             flash("Transfer Failed due to an unexpected database configuration error.", "danger")
+             last_outcome.update({'status': 'Failed', 'reason': 'Unexpected DB Error', 'qkd_status_msg': log_status})
+             # log_failed_attempt(...)
+
+    except Exception as e: # Catch truly unexpected errors during transaction phase
+        log_status = "UNEXPECTED_TXN_ERR"
+        error_message = str(e)
+        logging.critical(f"CRITICAL UNEXPECTED Error during transfer transaction: {error_message}", exc_info=True)
+        flash("Transfer Failed due to a critical unexpected system error.", "danger") # Use 'danger' category
         last_outcome.update({'status': 'Failed', 'reason': 'Critical Unexpected Error', 'qkd_status_msg': log_status})
-        log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber >=0 else None, fraud_reason="Critical Unexpected Error", exception_info=e)
+        # log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber is not None and qber >=0 else None, fraud_reason="Critical Unexpected Error", exception_info=e)
 
-    # --- Finally Block for Cleanup (Rollback/Close Resources) ---
-    finally:
-        # Ensure connection and cursor are closed properly
-        if conn and not getattr(conn, 'closed', True): # Check connection exists and not closed
-            if needs_rollback: # Check if rollback is needed (commit didn't happen)
+    finally: # Cleanup for the main transaction block
+        if conn: # Check if connection object exists
+            if needs_rollback:
                 try:
                     conn.rollback()
-                    logging.info(f"Transfer transaction rolled back (Final Status before rollback: {log_status}).")
-                except DBError as rb_err:
-                    logging.error(f"Rollback failed during transfer error handling: {rb_err}")
-                except Exception as rb_gen_err:
-                     logging.error(f"Unexpected error during transfer rollback: {rb_gen_err}")
-
-            # Close cursor if it exists and is not already closed
-            if cursor and not getattr(cursor, 'closed', True):
-                 try:
-                     cursor.close()
-                 except DBError: # Ignore psycopg2 errors closing cursor
-                     pass
-                 except Exception as cur_close_err:
-                     logging.error(f"Unexpected error closing transfer cursor: {cur_close_err}")
-
-            # Always attempt to close the connection obtained in this try block
+                    logging.info(f"Transfer transaction rolled back (Final Status: {log_status}).")
+                except Exception as rb_err: # Catch generic error during rollback
+                    logging.error(f"Rollback failed during transfer error handling: {rb_err}", exc_info=True)
+            if cursor:
+                 try: cursor.close()
+                 except Exception: pass # Ignore cursor close errors
+            # Ensure close_db_connection is defined and handles errors safely
             close_db_connection(conn)
+            logging.debug("DB connection closed in finally block.")
 
-    # --- After try/except/finally ---
-    # Store final outcome in session and redirect back to index
+    # --- Store outcome in session and redirect ---
     session['last_transfer_outcome'] = last_outcome
-    session.modified = True
-    return redirect(url_for('index'))
+    session.modified = True # Explicitly mark session as modified
+    return redirect(url_for('index')) # Redirect to dashboard/index page
 
 
+# === HISTORY ROUTE ===
 @app.route('/history', methods=['GET'])
 @login_required
 def history():
     """Displays transaction history for the logged-in user."""
+    # Ensure g.user is populated
+    if not g.user or 'id' not in g.user:
+        flash("User session error. Please log in again.", "error")
+        return redirect(url_for('login'))
     user_id = g.user['id']
-    display_log = [] # Initialize list to hold formatted log entries
-    conn = None # Initialize connection outside try
-    cursor = None # Initialize cursor outside try
 
+    display_log = []
+    conn = None # Initialize conn to None
+    cursor = None # Initialize cursor to None
+    db_error_type = psycopg2.Error if POSTGRES_AVAILABLE else (MySQLError if MYSQL_AVAILABLE else Exception)
+    
     try:
-        conn = get_db_connection() # Attempt to get DB connection
+        # Ensure get_db_connection is defined
+        conn = get_db_connection()
         if not conn:
-            # If connection failed, flash error and return template with empty list
-            flash("Database connection error. Cannot load history.", "error")
-            return render_template('history.html', log_entries=[], user_id=user_id)
+            flash("Database error. Cannot load history.", "error")
+            # Render template with empty list if connection fails
+            return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('username'))
 
-        # Use DictCursor for easier row access by column name (PostgreSQL specific)
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # Create cursor based on connection type
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+             cursor = conn.cursor(dictionary=True) # No buffer needed for SELECT
+        else:
+             raise ConnectionError("Cannot determine cursor type for history.")
 
-        # SQL query to fetch relevant transaction logs
+        # SQL to fetch history involving the user as sender OR receiver
+        # Use LEFT JOINs to get names even if accounts/customers were deleted (unlikely in this schema)
         sql = """
-            SELECT
-                l.log_id, l.timestamp AS ts,
-                l.sender_account_id AS sender_id,
-                s_cust.customer_name AS sender_name,
-                s_acc.customer_id AS sender_cust_id,
-                l.receiver_account_id AS receiver_id,
-                r_cust.customer_name AS receiver_name,
-                r_acc.customer_id AS receiver_cust_id,
-                l.amount, l.qkd_status, l.qber_value AS qber,
-                l.encrypted_confirmation AS enc_confirm,
-                l.is_flagged, l.fraud_reason
+            SELECT l.log_id, l.timestamp AS ts,
+                   l.sender_account_id AS sender_id, s_cust.customer_name AS sender_name, s_acc.customer_id AS sender_cust_id,
+                   l.receiver_account_id AS receiver_id, r_cust.customer_name AS receiver_name, r_acc.customer_id AS receiver_cust_id,
+                   l.amount, l.qkd_status, l.qber_value AS qber, l.encrypted_confirmation AS enc_confirm,
+                   l.is_flagged, l.fraud_reason
             FROM qkd_transaction_log l
             LEFT JOIN accounts s_acc ON l.sender_account_id = s_acc.account_id
             LEFT JOIN customers s_cust ON s_acc.customer_id = s_cust.customer_id
@@ -1590,200 +2387,227 @@ def history():
             LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id
             WHERE s_acc.customer_id = %s OR r_acc.customer_id = %s
             ORDER BY l.timestamp DESC
-            LIMIT 100
-            """
+            LIMIT 100 -- Limit the number of history entries shown
+        """
         cursor.execute(sql, (user_id, user_id))
-        entries_raw = cursor.fetchall() # Fetch all matching rows
+        entries_raw = cursor.fetchall()
 
-        # Process each fetched row
+        # Format entries for display
         for entry in entries_raw:
-            try: # Inner try for formatting each individual log entry
-                # Safely get and format amount
-                amt = Decimal(entry.get('amount', '0.00'))
+            try: # Inner try for formatting each log entry safely
+                amt = Decimal(entry.get('amount', '0.00')) # Default to 0 if amount is missing/invalid
+                qber_val = f"{entry.get('qber'):.3f}" if entry.get('qber') is not None else "N/A"
 
-                # Safely format QBER
-                qber_raw = entry.get('qber')
-                qber_val = f"{qber_raw:.3f}" if qber_raw is not None and isinstance(qber_raw, (float, Decimal)) else "N/A"
-
-                # Determine encrypted status (show N/A for failed txns)
-                qkd_status = entry.get('qkd_status','N/A')
+                # Determine status of encrypted details
                 enc_status = "[Encrypted]" if entry.get('enc_confirm') else "[N/A]"
-                if "FAIL" in qkd_status or "ERR" in qkd_status:
+                qkd_raw_status = entry.get('qkd_status','')
+                if qkd_raw_status and ("FAIL" in qkd_raw_status or "ERROR" in qkd_raw_status or "ABORT" in qkd_raw_status):
                      enc_status = "[N/A - Failed Txn]"
 
-                # Format flagged status and reason
+                # Format fraud flag display
                 is_flagged = entry.get('is_flagged', False)
                 raw_reason = entry.get('fraud_reason')
+                # Show specific reason if flagged, otherwise just 'Yes'/'No'
                 display_reason = raw_reason if is_flagged and raw_reason else ("Yes" if is_flagged else "No")
 
-                # Determine direction relative to the logged-in user
-                direction = "Sent" if entry.get('sender_cust_id') == user_id else \
-                            ("Received" if entry.get('receiver_cust_id') == user_id else "")
+                # Determine direction (Sent/Received)
+                direction = ""
+                if entry.get('sender_cust_id') == user_id: direction = "Sent"
+                elif entry.get('receiver_cust_id') == user_id: direction = "Received"
 
-                # Append formatted data to display list
+                # Append formatted entry to display list
                 display_log.append({
-                    'id': entry.get('log_id'), # Use get for safety
-                    'timestamp': entry.get('ts').strftime('%Y-%m-%d %H:%M:%S') if entry.get('ts') else 'N/A',
-                    'sender': f"{entry.get('sender_name', '?')} ({entry.get('sender_id', '?')})",
-                    'receiver': f"{entry.get('receiver_name', '?')} ({entry.get('receiver_id', '?')})",
-                    'amount': f"{amt:.2f}",
-                    'qkd_status': qkd_status.replace('_', ' '), # Make status readable
+                    'id': entry.get('log_id'),
+                    'timestamp': entry.get('ts').strftime('%Y-%m-%d %H:%M:%S') if isinstance(entry.get('ts'), datetime.datetime) else 'N/A',
+                    'sender': f"{entry.get('sender_name', 'Unknown')} (Acc ID: {entry.get('sender_id', '?')})",
+                    'receiver': f"{entry.get('receiver_name', 'Unknown')} (Acc ID: {entry.get('receiver_id', '?')})",
+                    'amount': f"{amt:.2f}", # Format amount with 2 decimal places
+                    'qkd_status': qkd_raw_status.replace('_', ' '), # Make status more readable
                     'qber': qber_val,
                     'encrypted_details_status': enc_status,
-                    'is_flagged_display': display_reason, # Display reason or Yes/No
-                    'fraud_reason': raw_reason, # Keep raw reason for potential tooltips etc.
-                    'is_flagged': is_flagged, # Boolean value for template logic
-                    'direction': direction # Sent/Received indicator
+                    'is_flagged_display': display_reason,
+                    'fraud_reason': raw_reason, # Keep raw reason available if needed
+                    'is_flagged': is_flagged,
+                    'direction': direction
                 })
-            except Exception as display_err:
-                # Log if formatting a specific entry fails, but continue with others
-                logging.warning(f"Error formatting log entry {entry.get('log_id', '?')} for history display: {display_err}")
+            except Exception as display_err: # Catch errors during formatting single entry
+                logging.warning(f"Error formatting log entry ID {entry.get('log_id', '?')} for history view: {display_err}", exc_info=True)
+                # Optionally append a placeholder error entry or just skip it
 
-    except DBError as e: # Catch PostgreSQL specific errors during query
-        flash(f"Database error retrieving history: {e}", "error")
-        logging.error(f"History Database Error for user {user_id}: {e}", exc_info=True)
-        # Return template with empty list as display_log will be empty
+    except (psycopg2.Error, MySQLError) as e: # Catch specific DB errors
+         # Check which error type it is if needed, otherwise log generically
+         error_type = "PostgreSQL" if POSTGRESQL_AVAILABLE and isinstance(e, psycopg2.Error) else ("MySQL" if MYSQL_AVAILABLE and isinstance(e, MySQLError) else "Database")
+         flash(f"History retrieval error: {error_type} error occurred.", "error")
+         logging.error(f"History DB error for user {user_id}: {e}", exc_info=True)
+         # Render with empty list on DB error
+         return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('username')) # Pass username for template
+
     except Exception as e: # Catch other unexpected errors
-        flash("An unexpected error occurred while loading history.", "error")
-        logging.error(f"Unexpected History Error for user {user_id}: {e}", exc_info=True)
-        # Return template with empty list
-    finally: # Ensure resources are cleaned up
-        # *** CORRECTED FINALLY BLOCK ***
-        if cursor:
-            try:
-                cursor.close()
-            except DBError: # Use DBError
-                pass # Ignore DB errors during close
-            except Exception as cur_close_err:
-                logging.error(f"Unexpected error closing history cursor: {cur_close_err}")
-        # Always close the connection if it was obtained
-        if conn: # Check if conn was successfully assigned
-             close_db_connection(conn)
-        # *** END CORRECTION ***
+        flash("Unexpected error loading history.", "error")
+        logging.error(f"Unexpected history loading error for user {user_id}: {e}", exc_info=True)
+        # Render with empty list on unexpected error
+        return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('username')) # Pass username
 
-    # Render the template with the processed log entries (or empty list on error)
-    return render_template('history.html', log_entries=display_log, user_id=user_id)
+    finally: # Ensure cursor and connection are closed
+        if cursor:
+             try: cursor.close()
+             except Exception: pass
+        if conn:
+             # Ensure close_db_connection is defined
+             close_db_connection(conn)
+             logging.debug("DB connection closed in history route finally block.")
+
+    # Render the history template with the formatted log entries
+    return render_template('history.html', log_entries=display_log, user_id=user_id, username=g.user.get('username'))
+
 
 @app.route('/qkd')
 @login_required
 def qkd_page():
     """Displays QKD info, last sim log, and QBER chart."""
     user_id = g.user['id']
-    logging.info(f"--- User {user_id} accessing QKD page ---")
+    logging.info(f"--- User {user_id} accessing QKD page ---") # Add start log
 
     # --- 1. Get Last Simulation Log ---
-    sim_log = None
+    sim_log = None # Default to None
     log_key = f'last_qkd_log_{user_id}'
     try:
         sim_log = session.get(log_key, None)
         logging.debug(f"Retrieved sim_log from session key '{log_key}': {type(sim_log)}")
+        if isinstance(sim_log, dict):
+             logging.debug(f"Sim log keys: {list(sim_log.keys())}")
+        elif sim_log is not None:
+             logging.warning(f"Sim log retrieved from session is not a dictionary: {sim_log}")
     except Exception as session_err:
-        logging.error(f"Error retrieving QKD log from session user {user_id}: {session_err}", exc_info=True)
-        flash("Could not load previous simulation data.", "warning")
+        logging.error(f"Error retrieving QKD simulation log from session for user {user_id}: {session_err}", exc_info=True)
+        flash("Could not load previous simulation data due to a session error.", "warning")
 
-    # --- 2. Prepare Threshold Values ---
+    # --- 2. Fetch QBER History for Chart ---
+    labels = []; values = []
+    conn = None; cursor = None; limit = 15
+
+    try: # Outer try for DB operations
+        conn = get_db_connection()
+        if conn:
+            logging.debug("DB connection successful for QBER history fetch.")
+            cursor = conn.cursor(dictionary=True)
+            sql = """ SELECT l.log_id, l.timestamp, l.qber_value AS qber
+                      FROM qkd_transaction_log l
+                      LEFT JOIN accounts s ON l.sender_account_id=s.account_id
+                      LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
+                      WHERE (s.customer_id=%s OR r.customer_id=%s)
+                        AND l.qber_value IS NOT NULL AND l.qber_value >= 0
+                        AND (l.qkd_status LIKE 'SECURED%' OR l.qkd_status = 'QKD_EVE_DETECTED')
+                      ORDER BY l.timestamp DESC LIMIT %s """
+            logging.debug(f"Executing QBER history SQL with params: ({user_id}, {user_id}, {limit})")
+            cursor.execute(sql, (user_id, user_id, limit))
+            history = cursor.fetchall()
+            logging.debug(f"Fetched {len(history)} rows for QBER history.")
+            history.reverse() # Oldest first for chart
+
+            for entry in history:
+                logging.debug(f"Processing history entry: {entry}")
+                log_id = entry.get('log_id'); qber_val = entry.get('qber'); ts = entry.get('timestamp')
+                if log_id and qber_val is not None and ts:
+                    label = f"{ts.strftime('%m/%d %H:%M')} (ID:{log_id})"
+                    try:
+                        logging.debug(f"Attempting to convert QBER value '{qber_val}' (type: {type(qber_val)}) to float.")
+                        qber_pct = float(qber_val) * 100
+                        labels.append(label); values.append(round(qber_pct, 2))
+                    except (ValueError, TypeError) as chart_err:
+                        logging.warning(f"Could not process QBER value '{qber_val}' for chart (Log ID: {log_id}): {chart_err}")
+                    except Exception as inner_chart_err: # Catch any other unexpected errors here
+                         logging.error(f"Unexpected error processing chart data for log {log_id}: {inner_chart_err}", exc_info=True)
+                else:
+                    logging.warning(f"Skipping history entry due to missing data: {entry}")
+
+        else: # DB Connection failed
+            logging.error(f"DB connection failed fetching QBER history for user {user_id}.")
+            labels, values = ['DB Unavailable'], [0]
+            flash("Could not load QBER history due to a database connection issue.", "error")
+
+    except MySQLError as e: # Catch DB errors
+        logging.error(f"Database error fetching QBER history for user {user_id}: {e}", exc_info=True)
+        labels, values = ['DB Error'], [0]
+        flash("An error occurred while retrieving QBER history.", "error")
+    except Exception as e: # Catch other unexpected errors
+         logging.error(f"Unexpected error fetching/processing QBER history for user {user_id}: {e}", exc_info=True)
+         labels, values = ['Processing Error'], [0]
+         flash("An unexpected error occurred while processing history data.", "error")
+    finally: # Ensure cleanup
+         if cursor:
+             try: cursor.close()
+             except MySQLError as cur_e: logging.error(f"Error closing QBER history cursor: {cur_e}")
+         if conn: close_db_connection(conn)
+         logging.debug("Finished QBER history fetch attempt.")
+
+    # --- 3. Prepare Data for Template ---
+    if not labels: labels, values = ['No History'], [0] # Default chart data
+
+    # *** FIX: Define qber_threshold_original consistently ***
+    qber_threshold_config = current_app.config.get('QBER_THRESHOLD', 0.15)
     qber_threshold_original = 0.15 # Default original value
     qber_threshold_pct = 15.0      # Default percentage value
     try:
-        qber_threshold_config = current_app.config['QBER_THRESHOLD']
+        logging.debug(f"QBER Threshold from config: {qber_threshold_config} (type: {type(qber_threshold_config)})")
+        # Assign to the correct variable name WITHOUT underscore
         qber_threshold_original = float(qber_threshold_config)
         qber_threshold_pct = qber_threshold_original * 100
-        logging.debug(f"QBER Thresholds: Original={qber_threshold_original}, Percent={qber_threshold_pct}")
-    except (ValueError, TypeError, KeyError) as thresh_err:
-         logging.error(f"Invalid or missing QBER_THRESHOLD config: {thresh_err}")
-         flash("Threshold config error. Using default.", "warning")
-         # Keep default values defined above
-
-    # --- 3. Fetch QBER History for Chart ---
-    labels = []; values = []
-    conn = None; cursor = None; limit = 15 # Max history points for chart
-
-    try:
-        conn = get_db_connection()
-        if conn:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor) # Use DictCursor
-            sql = """
-                SELECT l.log_id, l.timestamp, l.qber_value AS qber
-                FROM qkd_transaction_log l
-                LEFT JOIN accounts s ON l.sender_account_id=s.account_id
-                LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
-                WHERE (s.customer_id=%s OR r.customer_id=%s)
-                  AND l.qber_value IS NOT NULL AND l.qber_value >= 0
-                  AND (l.qkd_status LIKE 'SECURED%%' OR l.qkd_status = 'QKD_EVE_DETECTED')
-                ORDER BY l.timestamp DESC
-                LIMIT %s
-                """
-            cursor.execute(sql, (user_id, user_id, limit))
-            history = cursor.fetchall()
-            history.reverse() # Oldest first for chart display
-
-            for entry in history:
-                 log_id = entry.get('log_id'); qber_val = entry.get('qber'); ts = entry.get('timestamp')
-                 if log_id and qber_val is not None and ts:
-                     label = f"{ts.strftime('%m/%d %H:%M')} (ID:{log_id})" # Format label
-                     try:
-                         labels.append(label)
-                         values.append(round(float(qber_val) * 100, 2)) # Calculate percentage
-                     except (ValueError, TypeError):
-                         logging.warning(f"Skipping QBER chart entry {log_id}: Invalid QBER value '{qber_val}'")
-                         # Continue to next entry, don't append bad data
-                 else:
-                      logging.warning(f"Skipping QBER history entry due to missing data: {entry}")
-        else:
-            # Connection failed
-            labels, values = ['DB Unavailable'], [0]
-            flash("Database connection error loading QBER history.", "error")
-
-    except DBError as e: # Catch PostgreSQL errors
-        logging.error(f"QBER history DB error for user {user_id}: {e}", exc_info=True)
-        labels, values = ['DB Error'], [0]
-        flash("Database error loading QBER history.", "error")
-    except Exception as e: # Catch other unexpected errors
-        logging.error(f"QBER history unexpected error for user {user_id}: {e}", exc_info=True)
-        labels, values = ['Processing Error'], [0]
-        flash("Unexpected error loading QBER history.", "error")
-    finally:
-        # --- Corrected Finally Block ---
-        if cursor:
-            try:
-                cursor.close()
-            except DBError: # Use DBError
-                pass # Ignore DB errors closing cursor
-            except Exception as cur_close_err:
-                logging.error(f"Unexpected error closing QKD page cursor: {cur_close_err}")
-        # Check connection before closing
-        if conn:
-            close_db_connection(conn)
-        # --- End Correction ---
-
-    # Set default chart data if history fetch failed or returned empty
-    if not labels:
-        labels, values = ['No Recent QBER History'], [0]
+    except (ValueError, TypeError) as thresh_err:
+         logging.error(f"Invalid QBER_THRESHOLD configuration value: {qber_threshold_config} - {thresh_err}")
+         # Keep the defaults defined above
+         flash("Error reading QBER threshold configuration. Using default.", "warning")
+    # *** END FIX ***
 
     # --- 4. Render Template ---
     try:
+        logging.debug(f"Rendering qkd.html with sim_log type: {type(sim_log)}")
+        logging.debug(f"Passing QBER threshold original: {qber_threshold_original}") # Pass original
+        logging.debug(f"Passing QBER threshold %: {qber_threshold_pct}")
+        logging.debug(f"Passing history labels: {labels}")
+        logging.debug(f"Passing history values: {values}")
+
         return render_template('qkd.html',
                            simulation_log=sim_log,
-                           QBER_THRESHOLD_PCT=qber_threshold_pct,
-                           QBER_THRESHOLD_ORIGINAL=qber_threshold_original, # Pass original for comparisons
-                           qber_history_labels=labels,
-                           qber_history_values=values)
+                           QBER_THRESHOLD_PCT=qber_threshold_pct, # For display/chart line
+                           # *** Ensure this uses the corrected variable name ***
+                           QBER_THRESHOLD_ORIGINAL=qber_threshold_original, # For comparisons in template
+                           qber_history_labels=labels, # Renamed for clarity
+                           qber_history_values=values) # Renamed for clarity
     except Exception as render_err:
          logging.error(f"Error rendering qkd.html template: {render_err}", exc_info=True)
-         abort(500) # Trigger 500 handler if template render fails
+         abort(500) # Trigger 500 handler
+
 
 @app.route('/qkd/report/download')
 @login_required
 def download_qkd_report():
-    user_id = g.user['id']; sim_log = session.get(f'last_qkd_log_{user_id}')
-    if not sim_log: flash("No QKD data found.", "warning"); return redirect(url_for('qkd_page'))
-    logging.info(f"User {user_id} downloading QKD sim report.")
+    """Generates and serves the PDF report for the last QKD simulation."""
+    user_id = g.user['id']
+    simulation_log = session.get(f'last_qkd_log_{user_id}')
+
+    if not simulation_log:
+        flash("No QKD simulation data found in session.", "warning")
+        return redirect(url_for('qkd_page'))
+
+    logging.info(f"User {user_id} downloading QKD simulation report.")
     try:
-        pdf_bytes = create_qkd_simulation_report(sim_log)
-        if not pdf_bytes: logging.error("QKD PDF generation failed."); flash("Failed QKD PDF generation.", "danger"); return redirect(url_for('qkd_page'))
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S"); fname = f"QKD_Sim_Report_{ts}.pdf"
-        logging.info(f"Serving QKD Sim PDF '{fname}'"); return Response(pdf_bytes, mimetype="application/pdf", headers={"Content-Disposition": f"attachment;filename={fname}"})
-    except Exception as e: logging.error(f"QKD PDF report error: {e}", exc_info=True); flash("QKD report error.", "danger"); return redirect(url_for('qkd_page'))
+        pdf_bytes = create_qkd_simulation_report(simulation_log)
+        if not pdf_bytes:
+            logging.error(f"QKD PDF generation failed (returned None) for user {user_id}.")
+            flash("Failed to generate QKD simulation report.", "danger")
+            return redirect(url_for('qkd_page'))
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"QKD_Simulation_Report_{ts}.pdf"
+        logging.info(f"Serving QKD Simulation PDF '{filename}'")
+        return Response(pdf_bytes, mimetype="application/pdf",
+                        headers={"Content-Disposition": f"attachment;filename={filename}"})
+    except Exception as e: # Catch errors during PDF generation/response
+        logging.error(f"Error generating/sending QKD PDF report for user {user_id}: {e}", exc_info=True)
+        flash("An error occurred while preparing the QKD report.", "danger")
+        return redirect(url_for('qkd_page'))
+
 
 @app.route('/quantum-impact')
 def quantum_impact(): return render_template("quantum_impact.html")
@@ -1791,423 +2615,442 @@ def quantum_impact(): return render_template("quantum_impact.html")
 @app.route('/about')
 def about(): return render_template("about.html")
 
-def get_flagged_transactions(user_id, limit=50):
-    """
-    Fetches recently flagged transactions involving the user.
-    Adapted for PostgreSQL.
-    """
-    txns = [] # Initialize list for results
-    conn = None # Initialize connection outside try
-    cursor = None # Initialize cursor outside try
-
-    try:
-        conn = get_db_connection() # Attempt to get connection
-        if not conn:
-            logging.error(f"DB Connection failed fetching flagged tx for user {user_id}")
-            # No flash here, let calling route handle UI message if needed
-            return txns # Return empty list
-
-        # Use DictCursor for easier access by column name
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        sql = """
-            SELECT
-                l.log_id, l.timestamp AS ts,
-                s_cust.customer_name AS sender,
-                r_cust.customer_name AS receiver,
-                l.amount, l.fraud_reason
-            FROM qkd_transaction_log l
-            LEFT JOIN accounts s ON l.sender_account_id = s.account_id
-            LEFT JOIN customers s_cust ON s.customer_id = s_cust.customer_id
-            LEFT JOIN accounts r ON l.receiver_account_id = r.account_id
-            LEFT JOIN customers r_cust ON r.customer_id = r_cust.customer_id
-            WHERE (s.customer_id = %s OR r.customer_id = %s) -- User involved as sender OR receiver
-              AND l.is_flagged = TRUE -- Only flagged transactions
-            ORDER BY l.timestamp DESC
-            LIMIT %s
-            """
-        cursor.execute(sql, (user_id, user_id, limit))
-        raw_flagged_txns = cursor.fetchall() # Fetch all results
-
-        # Process results safely
-        for entry in raw_flagged_txns:
-             try: # Inner try to handle formatting errors for individual rows
-                 # Safely convert amount
-                 amt_val = entry.get('amount')
-                 amt = Decimal(amt_val) if amt_val is not None else Decimal('0.00')
-                 # Safely format timestamp
-                 ts_val = entry.get('ts')
-                 ts_str = ts_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(ts_val, datetime.datetime) else 'N/A'
-                 # Append formatted dict to results list
-                 txns.append({
-                     'id': entry.get('log_id'), # Use get for safety
-                     'timestamp': ts_str,
-                     'sender': f"{entry.get('sender', '?')}", # Use get for safety
-                     'receiver': f"{entry.get('receiver', '?')}",
-                     'amount': f"{amt:.2f}",
-                     'fraud_reason': entry.get('fraud_reason', 'N/A') # Use get with default
-                 })
-             except (InvalidOperation, TypeError, ValueError) as fe:
-                 logging.warning(f"Error formatting flagged tx data {entry.get('log_id', '?')}: {fe}")
-             except Exception as fe_other: # Catch unexpected formatting errors
-                  logging.error(f"Unexpected error formatting flagged tx {entry.get('log_id', '?')}: {fe_other}", exc_info=True)
-
-    except DBError as e: # Catch PostgreSQL specific errors
-        logging.error(f"Flagged tx DB error user {user_id}: {e}", exc_info=True)
-        # Flash message should be handled by the route calling this function
-        # flash("Error loading flagged transaction data.", "error") # Avoid flashing in helper
-    except Exception as e: # Catch other unexpected errors during fetch/processing
-        logging.error(f"Unexpected error loading flagged tx user {user_id}: {e}", exc_info=True)
-        # flash("Unexpected error loading flagged transactions.", "error") # Avoid flashing in helper
-    finally: # Ensure resources are always cleaned up
-        # *** CORRECTED FINALLY BLOCK ***
-        if cursor:
-            try:
-                cursor.close()
-            except DBError: # Use DBError
-                pass # Ignore DB errors during close
-            except Exception as cur_close_err:
-                logging.error(f"Unexpected error closing flagged_txns cursor: {cur_close_err}")
-        # Check connection before closing
-        if conn:
-            close_db_connection(conn)
-        # *** END CORRECTION ***
-
-    # Return the list of formatted transactions (might be empty)
-    return txns
-
 @app.route('/profile')
 @login_required
 def profile():
     """Displays the user profile page with details and logout."""
     user_id = g.user['id']
     account = None # Initialize account to None
-    conn = None # Initialize connection variable
-    cursor = None # Initialize cursor variable
-    db_type = "Unknown" # To track which DB is being used
 
-    try:
-        conn = get_db_connection() # Get connection first
-        if not conn:
-            # Raise an error or handle appropriately if connection failed
-            raise ConnectionError("Database connection failed.")
-
-        # --- Cursor Creation based on DB type ---
-        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
-            # Using PostgreSQL (check instance type for safety)
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            db_type = "PostgreSQL"
-        elif MYSQL_AVAILABLE and hasattr(conn, 'is_connected'): # Heuristic for MySQL conn
-            # Using MySQL
+    # Fetch associated account details for the logged-in user
+    conn = get_db_connection()
+    cursor = None
+    if conn:
+        try:
             cursor = conn.cursor(dictionary=True)
-            db_type = "MySQL"
-        else:
-            # Fallback (might error later, but attempts basic cursor)
-            cursor = conn.cursor()
-            db_type = "Fallback"
-        logging.debug(f"Profile: Using {db_type} cursor.")
-        # --- End Cursor Creation ---
+            # Fetch the primary account associated with the customer ID
+            cursor.execute("""
+                SELECT account_id, account_number, balance
+                FROM accounts
+                WHERE customer_id = %s
+                ORDER BY account_id ASC
+                LIMIT 1
+            """, (user_id,))
+            account_raw = cursor.fetchone()
+            if account_raw:
+                 # Ensure balance is Decimal
+                 try:
+                     account_raw['balance'] = Decimal(account_raw['balance'])
+                 except (InvalidOperation, TypeError):
+                      logging.warning(f"Could not convert balance '{account_raw['balance']}' to Decimal for user {user_id}")
+                      account_raw['balance'] = Decimal('0.00') # Default on error
+                 account = account_raw # Assign the processed dict
+            else:
+                 logging.warning(f"No account found for user {user_id} in profile page.")
 
-        # Fetch the primary account associated with the customer ID
-        cursor.execute("""
-            SELECT account_id, account_number, balance
-            FROM accounts
-            WHERE customer_id = %s
-            ORDER BY account_id ASC
-            LIMIT 1
-        """, (user_id,))
-        account_raw = cursor.fetchone() # Fetches as RealDictRow (psql) or dict (mysql)
-
-        if account_raw:
-             # Ensure balance is Decimal
-             try:
-                 # Convert balance via string for better cross-DB compatibility
-                 raw_balance = account_raw.get('balance', '0.00') # Get balance safely
-                 account_raw['balance'] = Decimal(str(raw_balance))
-             except (InvalidOperation, TypeError, ValueError) as dec_err:
-                  logging.warning(f"Profile: Could not convert balance '{raw_balance}' to Decimal for user {user_id}: {dec_err}")
-                  account_raw['balance'] = Decimal('0.00') # Default on error
-
-             # Convert row to standard dict before passing to template
-             account = dict(account_raw)
-        else:
-             logging.warning(f"No account found for user {user_id} in profile page.")
-
-    # --- Catch appropriate DB Error ---
-    except DB_ERROR_TYPE as e: # Use the DB_ERROR_TYPE defined based on environment
-        logging.error(f"Profile: DB error fetching account details (User {user_id}) using {db_type}: {e}")
-        flash("Could not load account details due to a database error.", "warning")
-    # --- Catch ConnectionError specifically ---
-    except ConnectionError as e:
-         logging.error(f"Profile: Connection Error for user {user_id}: {e}")
-         flash(str(e), "error") # Show connection error message
-    # --- Catch other potential errors ---
-    except Exception as e:
-         logging.error(f"Profile: Unexpected error fetching account details (User {user_id}): {e}", exc_info=True)
-         flash("An unexpected error occurred while loading profile details.", "warning")
-    # --- Ensure cleanup in finally ---
-    finally:
-        if cursor:
-            try: cursor.close()
-            # Catch potential close errors for the specific DB type or fallback
-            except DB_ERROR_TYPE: pass
-            except Exception: pass
-        if conn:
-            # Use your existing close_db_connection helper
+        except MySQLError as e:
+            logging.error(f"DB error fetching account details for profile page (User {user_id}): {e}")
+            flash("Could not load account details due to a database error.", "warning")
+        except Exception as e:
+             logging.error(f"Unexpected error fetching account details for profile (User {user_id}): {e}", exc_info=True)
+             flash("An unexpected error occurred while loading profile details.", "warning")
+        finally:
+            if cursor:
+                try: cursor.close()
+                except MySQLError: pass
             close_db_connection(conn)
+    else:
+        flash("Database connection unavailable. Cannot load full profile.", "error")
 
     # Pass user (from g) and account details (fetched or None) to the template
     return render_template('profile.html', user=g.user, account=account)
-  
+
+def get_flagged_transactions(user_id, limit=50):
+    """Fetches recently flagged transactions involving the user."""
+    txns = []; conn = get_db_connection(); cursor = None
+    if not conn:
+        logging.error(f"DB Conn fail flagged tx for user {user_id}")
+        return txns # Return empty list
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        sql = """SELECT l.log_id, l.timestamp AS ts, s_cust.customer_name AS sender,
+                       r_cust.customer_name AS receiver, l.amount, l.fraud_reason
+                  FROM qkd_transaction_log l
+                  LEFT JOIN accounts s ON l.sender_account_id=s.account_id
+                  LEFT JOIN customers s_cust ON s.customer_id=s_cust.customer_id
+                  LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
+                  LEFT JOIN customers r_cust ON r.customer_id=r_cust.customer_id
+                  WHERE (s.customer_id=%s OR r.customer_id=%s) AND l.is_flagged=TRUE
+                  ORDER BY l.timestamp DESC LIMIT %s"""
+        cursor.execute(sql, (user_id, user_id, limit))
+        raw = cursor.fetchall()
+
+        for entry in raw:
+             try: # Process each row safely
+                 amt = Decimal(entry.get('amount', '0.00'))
+                 ts_str = entry.get('ts').strftime('%Y-%m-%d %H:%M:%S') if entry.get('ts') else 'N/A' # Use full timestamp
+                 txns.append({
+                     'id': entry.get('log_id'), 'timestamp': ts_str,
+                     'sender': f"{entry.get('sender', '?')}",
+                     'receiver': f"{entry.get('receiver', '?')}",
+                     'amount': f"{amt:.2f}",
+                     'fraud_reason': entry.get('fraud_reason', 'N/A') })
+             except Exception as fe:
+                 logging.warning(f"Error formatting flagged tx {entry.get('log_id', '?')}: {fe}")
+
+    except MySQLError as e:
+        logging.error(f"Flagged tx DB error user {user_id}: {e}", exc_info=True)
+        flash("Error loading flagged transaction data.", "error") # Flash error in the calling context
+    except Exception as e:
+        logging.error(f"Unexpected error loading flagged tx user {user_id}: {e}", exc_info=True)
+        flash("Unexpected error loading flagged transactions.", "error")
+    finally: # Ensure cleanup
+        if cursor: cursor.close()
+        close_db_connection(conn)
+    return txns
+
+
 @app.route('/fraud')
 @login_required
 def fraud_page():
     """Displays the fraud center page."""
-    user_id = g.user['id']
-    logging.info(f"User {user_id} accessing fraud page.")
-    flagged_txns = get_flagged_transactions(user_id)
-    # Flash message if retrieval failed (get_flagged_transactions returns empty on error)
-    # is handled within get_flagged_transactions or the calling route could check len()
+    flagged_txns = get_flagged_transactions(g.user['id'])
     return render_template("fraud.html", flagged_txns=flagged_txns)
 
 def get_log_entry_details(log_id):
-    """
-    Fetches detailed information for a specific transaction log entry.
-    Adapted for PostgreSQL. Returns dict or None.
-    """
+    """Fetches detailed information for a specific transaction log entry."""
     details = None
-    conn = None # Initialize outside try
+    conn = get_db_connection()
     cursor = None
-    logging.info(f"--- Fetching log details for log_id: {log_id} ---")
+    logging.info(f"--- Fetching log details for log_id: {log_id} ---") # Add this
+
+    if not conn:
+        logging.error(f"DB Conn fail log details {log_id}")
+        return None
 
     try:
-        conn = get_db_connection() # Attempt connection
-        if not conn:
-            logging.error(f"DB Connection failed fetching log details for {log_id}")
-            return None # Cannot proceed without connection
-
-        # Use DictCursor for easy column access by name
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        # SQL query to fetch transaction log and join with customer names
+        cursor = conn.cursor(dictionary=True)
         sql = """
             SELECT
-                l.*, -- Select all columns from the log table
-                s_acc.customer_id AS sender_cust_id,
-                s_cust.customer_name AS sender_name,
-                r_acc.customer_id AS receiver_cust_id,
-                r_cust.customer_name AS receiver_name
+                l.*, s_acc.customer_id AS sender_cust_id, s_cust.customer_name AS sender_name,
+                r_acc.customer_id AS receiver_cust_id, r_cust.customer_name AS receiver_name
             FROM qkd_transaction_log l
             LEFT JOIN accounts s_acc ON l.sender_account_id = s_acc.account_id
             LEFT JOIN customers s_cust ON s_acc.customer_id = s_cust.customer_id
             LEFT JOIN accounts r_acc ON l.receiver_account_id = r_acc.account_id
             LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id
             WHERE l.log_id = %s
-            """
+        """
         cursor.execute(sql, (log_id,))
-        entry = cursor.fetchone() # Fetch one row (DictRow object or None)
-        logging.debug(f"Raw DB entry fetched for log {log_id}: {'Found' if entry else 'Not Found'}")
+        entry = cursor.fetchone()
+        logging.debug(f"Raw DB entry fetched for log {log_id}: {entry}") # Add this
 
         if entry:
-            # Inner try block for safe data formatting
             try:
-                # Safely get and format amount
-                amt_val = entry.get('amount')
-                amt_decimal = Decimal(amt_val) if amt_val is not None else Decimal('0.00')
-                amount_display = f"{amt_decimal:.2f}"
+                # Format data carefully
+                amount_val = entry.get('amount')
+                amount_decimal = Decimal(amount_val) if amount_val is not None else Decimal('0.00')
+                amount_display = f"{amount_decimal:.2f}"
 
-                # Safely get and format QBER
                 qber_val = entry.get('qber_value')
                 qber_display = f"{qber_val:.4f}" if qber_val is not None and isinstance(qber_val, (float, Decimal)) else "N/A"
 
-                # Safely get and format timestamp
-                ts_val = entry.get('timestamp')
-                timestamp_display = ts_val.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(ts_val, datetime.datetime) else 'N/A'
+                timestamp_val = entry.get('timestamp')
+                timestamp_display = timestamp_val.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(timestamp_val, datetime.datetime) else 'N/A'
 
-                # Get flag status and reason
                 is_flagged = entry.get('is_flagged', False)
                 raw_reason = entry.get('fraud_reason')
-                # Assign reason only if actually flagged, otherwise None
-                reason_display = raw_reason if is_flagged and raw_reason else None
+                # Use raw reason if flagged, otherwise None/N/A
+                reason_display = raw_reason if is_flagged and raw_reason else (None if not is_flagged else 'N/A')
 
-                # Get encrypted data, ensure None if missing or "None" string
-                enc_data = entry.get('encrypted_confirmation')
-                enc_data = enc_data if enc_data and enc_data != 'None' else None
+                encrypted_hex = entry.get('encrypted_confirmation', None)
+                if not encrypted_hex or encrypted_hex == 'None': # Handle if 'None' string is stored
+                    encrypted_hex = None
 
-                # Format sender/receiver details safely
                 sender_name = entry.get('sender_name', '?')
                 sender_acc_id = entry.get('sender_account_id', '?')
                 receiver_name = entry.get('receiver_name', '?')
                 receiver_acc_id = entry.get('receiver_account_id', '?')
-                sender_details = f"{sender_name} (Account ID: {sender_acc_id})"
-                receiver_details = f"{receiver_name} (Account ID: {receiver_acc_id})"
+                logging.debug(f"Formatting Sender: Name='{sender_name}', AccID='{sender_acc_id}'")
+                logging.debug(f"Formatting Receiver: Name='{receiver_name}', AccID='{receiver_acc_id}'")
 
-                # Construct the final dictionary
                 details = {
-                    'log_id': entry.get('log_id'), # Use get for safety
+                    'log_id': entry['log_id'],
                     'sender_customer_id': entry.get('sender_cust_id'),
                     'receiver_customer_id': entry.get('receiver_cust_id'),
                     'timestamp': timestamp_display,
-                    'sender_details': sender_details,
-                    'receiver_details': receiver_details,
+                    'sender_details': f"{sender_name} (Account ID: {sender_acc_id})",
+                    'receiver_details': f"{receiver_name} (Account ID: {receiver_acc_id})",
                     'amount': amount_display,
                     'qkd_status': entry.get('qkd_status', 'N/A').replace('_', ' '),
                     'qber': qber_display,
-                    'encrypted_confirmation_data': enc_data, # Contains data or None
+                    'encrypted_confirmation_data': encrypted_hex, # Holds actual data or None
                     'is_flagged': is_flagged,
-                    'fraud_reason': reason_display, # Contains reason string or None
+                    'fraud_reason': reason_display, # Holds reason string or None/N/A
                 }
                 logging.debug(f"Formatted details dictionary for log {log_id}: {details}")
 
             except (InvalidOperation, TypeError, ValueError) as format_err:
-                logging.error(f"Error formatting data for log ID {log_id}: {format_err}")
-                details = None # Set details to None if formatting fails
+                logging.error(f"Error formatting log details for log ID {log_id}: {format_err}")
+                details = None
             except Exception as format_err:
                  logging.error(f"Unexpected error formatting log {log_id}: {format_err}", exc_info=True)
                  details = None
         else:
             logging.warning(f"Log entry with ID {log_id} not found in DB.")
-            details = None # Ensure details is None if entry not found
+            details = None
 
-    except DBError as e: # Catch PostgreSQL specific errors
+    except MySQLError as e:
         logging.error(f"Database error fetching details for log ID {log_id}: {e}", exc_info=True)
-        details = None # Ensure details is None on DB error
-    except Exception as e: # Catch other unexpected errors
+        details = None
+    except Exception as e:
          logging.error(f"Unexpected error fetching details for log {log_id}: {e}", exc_info=True)
          details = None
     finally:
-        # --- Corrected Finally Block ---
         if cursor:
-            try:
-                cursor.close()
-            except DBError as cur_close_err: # Use DBError
-                # Log DB-specific close errors if needed, otherwise pass
-                # logging.warning(f"DBError closing get_details cursor: {cur_close_err}")
-                pass
-            except Exception as cur_close_err: # Catch other potential close errors
-                logging.error(f"Unexpected error closing get_details cursor: {cur_close_err}")
-        # Always close the connection if it was obtained
-        if conn: # Check if conn was successfully assigned
-            close_db_connection(conn)
-        # --- End Correction ---
+            try: cursor.close()
+            except MySQLError as cur_e: logging.error(f"Error closing log details cursor: {cur_e}")
+        close_db_connection(conn)
 
     logging.info(f"--- Finished fetching log details for log_id: {log_id}. Returning: {'Details found' if details else 'None'} ---")
     return details
 
+
 @app.route('/report/download/<int:log_id>')
 @login_required
 def download_report(log_id):
-    user_id = g.user['id']; log_data = get_log_entry_details(log_id)
-    if not log_data: abort(404, description="Report not found.")
-    if user_id != log_data.get('sender_customer_id') and user_id != log_data.get('receiver_customer_id'): abort(403)
+    """Generates and serves a PDF transaction report."""
+    user_id = g.user['id']
+    log_data = get_log_entry_details(log_id)
+
+    if not log_data: abort(404, description="Transaction report not found.")
+    # Authorization Check
+    if user_id != log_data.get('sender_customer_id') and user_id != log_data.get('receiver_customer_id'):
+        logging.warning(f"Auth fail: User {user_id} tried download report for log {log_id}.")
+        abort(403, description="You are not authorized to view this report.")
+
     try:
-        pdf_bytes = create_transaction_report(log_data)
-        if not pdf_bytes: abort(500, description="Report gen failed.")
-        fname = f"Txn_Report_{log_id}_{datetime.datetime.now():%Y%m%d}.pdf"; logging.info(f"Serving PDF '{fname}'")
-        return Response(pdf_bytes, mimetype="application/pdf", headers={"Content-Disposition": f"attachment;filename={fname}"})
-    except Exception as e: logging.error(f"PDF report error {log_id}: {e}"); abort(500)
+        pdf_bytes = create_transaction_report(log_data) # Generate PDF
+        if not pdf_bytes:
+            logging.error(f"Transaction PDF generation failed for log {log_id}.")
+            abort(500, description="Failed to generate transaction report.")
+
+        fname = f"Transaction_Report_{log_id}_{datetime.datetime.now():%Y%m%d}.pdf"
+        logging.info(f"Serving Transaction PDF '{fname}' for log {log_id}")
+        return Response(pdf_bytes, mimetype="application/pdf",
+                        headers={"Content-Disposition": f"attachment;filename={fname}"})
+    except Exception as e:
+        logging.error(f"Error generating/serving transaction PDF log {log_id}: {e}", exc_info=True)
+        abort(500, description="Error creating transaction report.")
 
 @app.route('/report/<int:log_id>')
 @login_required
 def show_report_page(log_id):
-     user_id = g.user['id']; logging.info(f"--- User {user_id} req report page {log_id} ---")
-     report_info = get_log_entry_details(log_id); logging.debug(f"Data for report {log_id}: {report_info}")
-     if not report_info: logging.warning(f"Report data not found {log_id}"); abort(404)
-     sender_cid = report_info.get('sender_customer_id'); receiver_cid = report_info.get('receiver_customer_id')
-     logging.debug(f"Auth check {log_id}: U={user_id}, S={sender_cid}, R={receiver_cid}")
-     if user_id != sender_cid and user_id != receiver_cid: logging.warning(f"AUTH FAIL report {log_id}"); abort(403)
-     logging.info(f"Auth OK render report {log_id}."); logging.debug(f"Passing data to report.html: {report_info}")
+     """Displays an HTML summary page for a specific transaction report."""
+     user_id = g.user['id']
+     logging.info(f"--- User {user_id} requesting report page for log_id: {log_id} ---")
+
+     # Fetch detailed log data
+     report_info = get_log_entry_details(log_id)
+     logging.debug(f"Data received from get_log_entry_details for log {log_id}: {report_info}")
+
+     # --- Authorization Check ---
+     if not report_info:
+         logging.warning(f"User {user_id} attempted view report page for non-existent/unfetchable log ID {log_id}.")
+         flash("Report data not found.", "error")
+         abort(404)
+
+     sender_cid = report_info.get('sender_customer_id')
+     receiver_cid = report_info.get('receiver_customer_id')
+     logging.debug(f"Auth check for log {log_id}: User={user_id}, SenderCID={sender_cid}, ReceiverCID={receiver_cid}")
+     if user_id != sender_cid and user_id != receiver_cid:
+         logging.warning(f"AUTH FAILED: User {user_id} attempted view report page for log {log_id}.")
+         flash("You are not authorized to view this report page.", "danger")
+         abort(403)
+
+     logging.info(f"User {user_id} authorized. Preparing render report summary page log {log_id}.")
+     logging.debug(f"Passing report_info to template report.html: {report_info}")
+
+     # Render the template, passing the fetched report_info
      return render_template('report.html', report_info=report_info)
+
 
 @app.route('/risk-analysis', methods=['GET', 'POST'])
 @login_required
 def risk_analysis_page():
-    # This route seems less database-dependent, might not need changes unless
-    # risk_simulation module interacts with the DB in a MySQL-specific way.
-    risk_results = None; analysis_type='portfolio'; form_data = {}; default_alpha=0.05; default_num_assets=3
+    """Handles risk analysis simulation requests."""
+    risk_results = None; analysis_type='portfolio'; form_data = {}
+
     if request.method == 'POST':
-        form_data = request.form; analysis_type = request.form.get('analysis_type', 'portfolio').lower()
-        logging.info(f"POST risk analysis: {analysis_type}")
-        config = {}
-        try:
+        form_data = request.form # Preserve form data for re-rendering
+        analysis_type = request.form.get('analysis_type', 'portfolio').lower()
+        logging.info(f"POST request for risk analysis type: {analysis_type}")
+        config = {}; default_alpha=0.05; default_num_assets=3
+
+        try: # Parameter parsing and validation
             if analysis_type == 'risk_measure':
                 alpha = float(request.form.get('param_alpha', str(default_alpha)))
-                if not (0 < alpha < 1): raise ValueError("Alpha must be 0-1.")
+                if not (0 < alpha < 1): raise ValueError("Alpha must be between 0 and 1.")
                 config['alpha'] = alpha
             elif analysis_type == 'portfolio':
                 num_assets = int(request.form.get('param_num_assets', str(default_num_assets)))
                 if not (1 < num_assets <= 10): raise ValueError("Assets must be 2-10.")
                 config['num_assets'] = num_assets
-            else: analysis_type = 'portfolio'; config['num_assets'] = default_num_assets
+            else: # Unknown type, default to portfolio
+                 logging.warning(f"Unknown risk analysis type '{analysis_type}'.")
+                 analysis_type = 'portfolio'; config['num_assets'] = default_num_assets
+
+            # Run Simulation
             logging.info(f"Running risk analysis: type='{analysis_type}', config={config}")
             risk_results = run_risk_analysis(analysis_type=analysis_type, config=config)
-            if risk_results and risk_results.get('status') != 'Error': flash("Simulation complete.", "success")
-            else: flash(f"Simulation failed: {risk_results.get('details', 'Unknown')}", "error")
-        except (ValueError, TypeError) as param_err: flash(f"Invalid parameter: {param_err}", "error"); risk_results = {'status': 'Error', 'details': f'Invalid parameter: {param_err}'}
-        except Exception as e: logging.error(f"Risk sim error ({analysis_type}): {e}", exc_info=True); flash("Simulation failed.", "error"); risk_results = {'status': 'Error', 'details': f'Internal error: {e}'}
+            if risk_results and risk_results.get('status') != 'Error':
+                flash("Risk analysis simulation completed.", "success")
+            else:
+                flash(f"Simulation failed: {risk_results.get('details', 'Unknown error')}", "error")
+
+        except (ValueError, TypeError) as param_err:
+            logging.warning(f"Invalid parameter for risk analysis '{analysis_type}': {param_err}")
+            flash(f"Invalid input parameter: {param_err}", "error")
+            risk_results = {'status': 'Error', 'details': f'Invalid parameter: {param_err}'}
+        except Exception as e: # Catch errors during simulation execution
+            logging.error(f"Risk simulation execution error ({analysis_type}): {e}", exc_info=True)
+            flash(f"Simulation failed due to an internal error.", "error")
+            risk_results = {'status': 'Error', 'details': f'Internal simulation error: {e}'}
+
+        # Render page again with results/errors and repopulated form
         return render_template('risk_analysis.html', risk_results=risk_results, analysis_type=analysis_type, form_data=form_data)
+
+    # Handle GET request (show initial form)
     return render_template('risk_analysis.html', risk_results=None, analysis_type=analysis_type, form_data={})
 
 # --- Context Processors ---
 @app.context_processor
 def inject_global_vars():
+    """Inject common variables into template contexts."""
     current_year = datetime.datetime.now().year
-    return dict(session_user=g.get('user'), INITIAL_BALANCE_DISPLAY=f"{app.config.get('INITIAL_BALANCE', Decimal('0.00')):.2f}",
-                QBER_THRESHOLD_DISPLAY=f"{app.config.get('QBER_THRESHOLD', 0.15):.2%}", current_year=current_year,
-                is_mail_available=MAIL_AVAILABLE, are_forms_enabled=WTFORMS_AVAILABLE)
+    return dict(
+        session_user=g.get('user'), # User info or None
+        INITIAL_BALANCE_DISPLAY=f"{app.config.get('INITIAL_BALANCE', Decimal('0.00')):.2f}",
+        QBER_THRESHOLD_DISPLAY=f"{app.config.get('QBER_THRESHOLD', 0.15):.2%}",
+        current_year=current_year,
+        is_mail_available=MAIL_AVAILABLE,
+        are_forms_enabled=WTFORMS_AVAILABLE
+        )
 
 # --- Error Handlers ---
 @app.errorhandler(404)
-@app.errorhandler(404)
 def page_not_found(e):
-    # --- MODIFIED USER ID FETCH ---
-    # Check if g.user exists AND is not None before trying to get id
-    user_id = g.user.get('id', 'Anonymous') if hasattr(g, 'user') and g.user else 'Anonymous'
-    # --- END MODIFICATION ---
+    user_id = g.user.get('id', 'Anonymous') if g.get('user') else 'Anonymous'
     logging.warning(f"404 Not Found: URL={request.url}, User={user_id}, Error={e.description}")
     return render_template('errors/404.html', error=e), 404
 
 @app.errorhandler(403)
-def forbidden(e): user_id = getattr(g, 'user', {}).get('id', 'Anon'); logging.warning(f"403: {request.url} U={user_id} E={e.description}"); return render_template('errors/403.html', error=e), 403
+def forbidden(e):
+    user_id = g.user.get('id', 'Anonymous') if g.get('user') else 'Anonymous'
+    logging.warning(f"403 Forbidden: URL={request.url}, User={user_id}, Error={e.description}")
+    return render_template('errors/403.html', error=e), 403
 
 @app.errorhandler(500)
 @app.errorhandler(Exception) # Catch other unhandled exceptions
 def internal_server_error(e):
+    """Handles 500 errors and attempts DB rollback if possible."""
     original_exception = getattr(e, "original_exception", e) # Get original exception
-    # --- MODIFIED USER ID FETCH ---
-    # Check if g.user exists AND is not None before trying to get id
-    user_id = g.user.get('id', 'Anonymous') if hasattr(g, 'user') and g.user else 'Anonymous'
-    # --- END MODIFICATION ---
+    user_id = g.user.get('id', 'Anonymous') if g.get('user') else 'Anonymous'
     logging.error(f"500 Internal Server Error: URL={request.url}, User={user_id}, Error={original_exception}", exc_info=original_exception)
-    # ... (rest of the handler) ...
+
+    # Best-effort rollback - This is complex without proper context management
+    # Consider using Flask-SQLAlchemy or similar for easier transaction handling
+    # conn = getattr(g, 'db_conn', None) # Hypothetical connection in g
+    # if conn and conn.is_connected(): # Attempt only if connection seems to exist
+    #     try:
+    #         conn.rollback()
+    #         logging.info("Attempted DB rollback on 500 handler.")
+    #     except Exception as rb_err:
+    #         logging.error(f"Rollback attempt failed during 500 handling: {rb_err}")
+
     return render_template('errors/500.html', error=original_exception), 500
 
 # --- Main execution block ---
 if __name__ == '__main__':
      print("\n" + "="*60 + "\n--- Starting QKD Secure Banking Demo App ---\n" + "="*60)
-     # Status checks ... (condensed)
-     print("\n--- Status Checks ---")
-     print(f"  - WTForms: {'OK' if WTFORMS_AVAILABLE else 'Disabled'}")
-     print(f"  - Mail: {'OK' if MAIL_AVAILABLE else 'Disabled'}")
-     try: model_fn=MODEL_FILENAME; feat_fn=FEATURES_FILENAME
-     except NameError: model_fn='fraud_model.joblib'; feat_fn='fraud_model_features.joblib'
-     print(f"  - ML Models: {'OK' if os.path.exists(os.path.join(script_dir, model_fn)) and os.path.exists(os.path.join(script_dir, feat_fn)) else 'MISSING!'}")
-     conn_test = get_db_connection()
-     print(f"  - DB Connection: {'OK' if conn_test else 'FAILED!'}")
-     if conn_test: close_db_connection(conn_test)
-     else: exit("FATAL: DB connection required.")
-     if MAIL_AVAILABLE: print(f"  - Email Config: {'OK' if app.config.get('MAIL_SERVER') else 'Incomplete'}")
-     if app.secret_key == 'a_very_insecure_default_secret_key_32bytes_': print("\n  WARNING: Using default FLASK_SECRET_KEY!")
 
-     # Start Server
-     print("\n--- Starting Server ---")
-     port = int(os.environ.get('PORT', 5000)); host = os.environ.get('HOST', '0.0.0.0')
-     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
-     print(f"  * Mode: {'dev' if debug_mode else 'prod'} | Debug: {'on' if debug_mode else 'off'} | Host: {host} | Port: {port}")
-     print(f"  * Access: http://{host if host != '0.0.0.0' else '127.0.0.1'}:{port}/")
-     print("="*60 + "\n")
+     # --- Dependency Checks Summary ---
+     print("\n--- Dependency Status ---")
+     # Optional modules check
+     if WTFORMS_AVAILABLE: print("  [OK] Flask-WTF/WTForms available.")
+     else: print("  [WARN] Flask-WTF/WTForms not available. Form validation limited.")
+     if MAIL_AVAILABLE: print("  [OK] Flask-Mail available.")
+     else: print("  [WARN] Flask-Mail not available/configured. Email features disabled.")
+     # Assume critical dependencies checked during imports
+
+     # --- Check ML Model Files ---
+     print("\n--- Checking ML Model Files ---")
      try:
-         from waitress import serve; print("--- Using Waitress ---"); serve(app, host=host, port=port, threads=8)
+         model_fn = MODEL_FILENAME; features_fn = FEATURES_FILENAME
+     except NameError: # Fallback if not imported
+         model_fn = 'fraud_model.joblib'; features_fn = 'fraud_model_features.joblib'
+         logging.warning("ML Filenames not found from import, using defaults.")
+     model_path = os.path.join(script_dir, model_fn)
+     features_path = os.path.join(script_dir, features_fn)
+     if os.path.exists(model_path) and os.path.exists(features_path):
+         print(f"  [OK] ML files found ('{model_fn}', '{features_fn}').")
+         # Assume load_ml_model() succeeded earlier if we reached this point
+     else:
+         print(f"  [ERROR] ML file(s) NOT FOUND (Model: {model_path}, Features: {features_path}).")
+         print("  [ERROR] Fraud detection may fail. Please run the training script.")
+         # Consider exiting: exit(1)
+
+     # --- Check DB Connection ---
+     print("\n--- Checking DB Connection ---")
+     conn_test = get_db_connection()
+     if conn_test:
+         print(f"  [OK] DB connection successful (Host: {MYSQL_HOST}, DB: {MYSQL_DB}).")
+         try: # Simple query test
+             cursor = conn_test.cursor(); cursor.execute("SELECT 1"); cursor.fetchone(); cursor.close()
+             print("  [OK] DB test query successful.")
+         except Exception as db_test_err:
+             print(f"  [WARN] DB connected, but test query failed: {db_test_err}")
+         finally: close_db_connection(conn_test)
+     else:
+         print(f"  [FATAL] Database connection FAILED.")
+         print(f"  Config: Host={MYSQL_HOST}, User={MYSQL_USER}, DB={MYSQL_DB}, Pwd Provided={'Yes' if MYSQL_PASSWORD else 'NO'}")
+         exit("FATAL: DB connection required.")
+
+     # --- Check Email Config Summary ---
+     print("\n--- Checking Email Config ---")
+     if MAIL_AVAILABLE:
+         is_local_dbg = app.config.get('MAIL_SERVER') == 'localhost' and app.config.get('MAIL_PORT') == 1025
+         essential_cfg = all([ app.config.get('MAIL_SERVER'), app.config.get('MAIL_USERNAME') if not is_local_dbg else True, app.config.get('MAIL_PASSWORD') is not None if not is_local_dbg else True, app.config.get('MAIL_DEFAULT_SENDER') ])
+         if essential_cfg or is_local_dbg: print(f"  [OK] Email configured (Server: {app.config.get('MAIL_SERVER')}).")
+         else: print("  [WARN] Email config appears incomplete. Check .env/environment vars.")
+     # No message needed if Mail is unavailable, already printed warning earlier
+
+     # --- Final Checks & Server Start ---
+     if app.secret_key == 'a_very_insecure_default_secret_key_32bytes_':
+         print("\n" + "*"*60 + "\n  CRITICAL WARNING: Using default FLASK_SECRET_KEY! Insecure.\n" + "*"*60 + "\n")
+
+     print("\n--- Starting Server ---")
+     port = int(os.environ.get('PORT', 5000))
+     host = os.environ.get('HOST', '0.0.0.0') # Use '0.0.0.0' to be accessible externally
+     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 't')
+
+     print(f"  * Environment: {'development' if debug_mode else 'production'}")
+     print(f"  * Debug mode: {'on' if debug_mode else 'off'}")
+     print(f"  * Running on http://{host}:{port}/ (Press CTRL+C to quit)")
+     print("="*60 + "\n")
+
+     try:
+         # Prefer Waitress for production if available
+         from waitress import serve
+         print("--- Using Waitress Production Server ---")
+         serve(app, host=host, port=port, threads=8) # Adjust threads as needed
      except ImportError:
-         print("--- Waitress not found, using Flask Dev Server ---")
-         if not debug_mode: print("  WARNING: Flask dev server not for production.")
+         print("--- Waitress not found, using Flask Development Server ---")
+         if not debug_mode:
+              print("  WARNING: Flask's development server is not recommended for production.")
+              print("  Install Waitress for better performance: pip install waitress")
          app.run(debug=debug_mode, host=host, port=port)
-     except Exception as start_err: logging.critical(f"Server start failed: {start_err}", exc_info=True); exit("FATAL: Server start failed.")
+     except Exception as start_err:
+          logging.critical(f"Server failed to start: {start_err}", exc_info=True)
+          exit("FATAL: Server start failed.")
