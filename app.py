@@ -1737,7 +1737,12 @@ def transfer_funds():
         except Exception as fraud_err: logging.error(f"Fraud check call failed: {fraud_err}"); fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check Error'}; flash("Warning: Fraud check error.", "warning")
         last_outcome['fraud_check'] = fraud_res; is_fraudulent_ml = fraud_res.get('is_fraudulent', False); ml_reason = fraud_res.get('reason')
         final_reason = qkd_fraud_reason or (ml_reason if is_fraudulent_ml else None); final_flagged = bool(final_reason)
-        if final_flagged: logging.warning(f"ALERT: {final_reason}") else: logging.info("Checks passed.")
+        # --- CORRECTED BLOCK ---
+        if final_flagged:
+            logging.warning(f"ALERT: {final_reason or 'Reason Unknown'}") # Added fallback for final_reason being None
+        else:
+            logging.info("Fraud check passed and no QKD alert.")
+        # --- END CORRECTION ---
         qkd_status = "SECURED_FLAGGED" if final_flagged else "SECURED"; last_outcome['qkd_status_msg'] = qkd_status.replace('_',' ')
 
         # Encrypt Confirmation
