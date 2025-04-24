@@ -648,28 +648,48 @@ def get_accounts_data(customer_id_filter=None):
     return accounts
 
 def get_user_by_email(email):
-    """Fetches user details by email. Returns dict or None."""
-    conn = get_db_connection()
-    cursor = None
-    user = None
-    if not conn: return None # DB connection failed
-    if not isinstance(email, str) or not email: return None # Basic validation
+    """Fetches user details by email. Adapted for PG/MySQL. Returns dict or None."""
+    user = None; conn = None; cursor = None; db_type = "Unknown"
+    if not isinstance(email, str) or not email: return None
 
     try:
-        cursor = conn.cursor(dictionary=True)
+        conn = get_db_connection()
+        if not conn: raise ConnectionError("DB connection failed in get_user_by_email.")
+
+        # --- CORRECTED CURSOR CREATION ---
+        # Check DB type based on connection object attribute (set in get_db_connection)
+        # db_type = getattr(conn, 'driver_name', 'Unknown') # Get DB type if attribute was set
+        # Or use isinstance check for more directness
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDictCursor for PG
+            db_type = "PostgreSQL"
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            cursor = conn.cursor(dictionary=True) # Use dictionary=True for MySQL
+            db_type = "MySQL"
+        else: # Fallback if type unknown
+            logging.warning("get_user_by_email: Unknown DB connection type, using basic cursor.")
+            cursor = conn.cursor() # May return tuples
+            db_type = "Fallback"
+        logging.debug(f"get_user_by_email: Using {db_type} cursor.")
+        # --- END CORRECTION ---
+
         cursor.execute("SELECT customer_id, customer_name, email, password_hash FROM customers WHERE email = %s", (email,))
-        user = cursor.fetchone()
-    except MySQLError as e:
-        logging.error(f"DB Error fetching user by email ({email}): {e}")
-        user = None # Ensure None on error
-    except Exception as e:
-        logging.error(f"Unexpected error fetching user by email ({email}): {e}", exc_info=True)
-        user = None
+        user_row = cursor.fetchone() # Fetches RealDictRow (PG), dict (MySQL), or tuple (Fallback)
+
+        # --- SAFER CONVERSION (Should work fine with RealDictRow/dict) ---
+        if user_row:
+            if hasattr(user_row, 'keys'): user = dict(user_row)
+            elif isinstance(user_row, (tuple, list)) and len(user_row) >= 4: user = {'customer_id': row[0], 'customer_name': row[1], 'email': row[2], 'password_hash': row[3]}
+            else: logging.error(f"Fetched user_row unexpected format: {type(user_row)}")
+        # --- END SAFER CONVERSION ---
+
+    except DB_ERROR_TYPE as e: logging.error(f"DB Error fetch user {email} ({db_type}): {e}"); user = None
+    except ConnectionError as e: logging.error(f"Conn error fetch user {email}: {e}"); user = None
+    except Exception as e: logging.error(f"Unexpected error fetch user {email}: {e}", exc_info=True); user = None
     finally:
-        if cursor:
-            try: cursor.close()
-            except MySQLError: pass
-        close_db_connection(conn)
+        # Use safe cleanup
+        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
+        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
     return user
 
 def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value=None, fraud_reason=None, exception_info=None):
