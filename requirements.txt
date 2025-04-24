@@ -1,5 +1,6 @@
 psycopg2-binary
 Flask>=3.0.0 # Or your specific version
+Flask-Login>=0.6.0
 mysql-connector-python>=8.0.0 # Or psycopg2-binary if using PostgreSQL
 python-dotenv>=1.0.0
 cryptography>=43.0.0 # Keep flexible
