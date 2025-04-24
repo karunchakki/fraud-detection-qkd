@@ -2828,102 +2828,145 @@ def fraud_page():
     return render_template("fraud.html", flagged_txns=flagged_txns)
 
 def get_log_entry_details(log_id):
-    """Fetches detailed information for a specific transaction log entry."""
+    """
+    Fetches detailed information for a specific transaction log entry.
+    Adapted for PostgreSQL/MySQL. Returns dict or None.
+    """
     details = None
-    conn = get_db_connection()
+    conn = None # Initialize outside try
     cursor = None
-    logging.info(f"--- Fetching log details for log_id: {log_id} ---") # Add this
-
-    if not conn:
-        logging.error(f"DB Conn fail log details {log_id}")
-        return None
+    db_type = "Unknown" # Initialize
+    logging.info(f"--- Fetching log details for log_id: {log_id} ---")
 
     try:
-        cursor = conn.cursor(dictionary=True)
+        conn = get_db_connection() # Attempt connection
+        if not conn:
+            logging.error(f"DB Connection failed fetching log details for {log_id}")
+            return None # Cannot proceed without connection
+
+        # Determine cursor type based on connection object
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDictCursor for PG
+            db_type = "PostgreSQL"
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            cursor = conn.cursor(dictionary=True) # Use dictionary=True for MySQL
+            db_type = "MySQL"
+        else: # Fallback if type unknown or driver missing
+            logging.warning(f"get_log_entry_details: Unknown DB type for conn {conn}, using basic cursor.")
+            cursor = conn.cursor()
+            db_type = "Fallback"
+        logging.debug(f"get_log_entry_details: Using {db_type} cursor.")
+
+        # SQL query to fetch transaction log and join with customer names
         sql = """
             SELECT
-                l.*, s_acc.customer_id AS sender_cust_id, s_cust.customer_name AS sender_name,
-                r_acc.customer_id AS receiver_cust_id, r_cust.customer_name AS receiver_name
+                l.*, -- Select all columns from the log table
+                s_acc.customer_id AS sender_cust_id,
+                s_cust.customer_name AS sender_name,
+                r_acc.customer_id AS receiver_cust_id,
+                r_cust.customer_name AS receiver_name
             FROM qkd_transaction_log l
             LEFT JOIN accounts s_acc ON l.sender_account_id = s_acc.account_id
             LEFT JOIN customers s_cust ON s_acc.customer_id = s_cust.customer_id
             LEFT JOIN accounts r_acc ON l.receiver_account_id = r_acc.account_id
             LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id
             WHERE l.log_id = %s
-        """
+            """
         cursor.execute(sql, (log_id,))
-        entry = cursor.fetchone()
-        logging.debug(f"Raw DB entry fetched for log {log_id}: {entry}") # Add this
+        entry = cursor.fetchone() # Fetches RealDictRow (PG), dict (MySQL), or tuple (Fallback)
+        logging.debug(f"Raw DB entry fetched for log {log_id}: {'Found' if entry else 'Not Found'}")
 
         if entry:
+            # Inner try block for safe data formatting
             try:
-                # Format data carefully
-                amount_val = entry.get('amount')
-                amount_decimal = Decimal(amount_val) if amount_val is not None else Decimal('0.00')
-                amount_display = f"{amount_decimal:.2f}"
+                # Safely get and format amount
+                amt_val = entry.get('amount') # Use .get() for dict-like access
+                amt_decimal = Decimal(str(amt_val)) if amt_val is not None else Decimal('0.00')
+                amount_display = f"{amt_decimal:.2f}"
 
+                # Safely get and format QBER
                 qber_val = entry.get('qber_value')
                 qber_display = f"{qber_val:.4f}" if qber_val is not None and isinstance(qber_val, (float, Decimal)) else "N/A"
 
-                timestamp_val = entry.get('timestamp')
-                timestamp_display = timestamp_val.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(timestamp_val, datetime.datetime) else 'N/A'
+                # Safely get and format timestamp
+                ts_val = entry.get('timestamp')
+                # Format as UTC assuming the DB stores it that way (recommended)
+                timestamp_display = ts_val.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(ts_val, datetime.datetime) else 'N/A'
 
+                # Get flag status and reason
                 is_flagged = entry.get('is_flagged', False)
                 raw_reason = entry.get('fraud_reason')
-                # Use raw reason if flagged, otherwise None/N/A
-                reason_display = raw_reason if is_flagged and raw_reason else (None if not is_flagged else 'N/A')
+                # Assign reason string only if actually flagged, otherwise None
+                reason_display = raw_reason if is_flagged and raw_reason else None
 
-                encrypted_hex = entry.get('encrypted_confirmation', None)
-                if not encrypted_hex or encrypted_hex == 'None': # Handle if 'None' string is stored
-                    encrypted_hex = None
+                # Get encrypted data, ensure None if missing or "None" string stored
+                enc_data = entry.get('encrypted_confirmation')
+                enc_data = enc_data if enc_data and enc_data != 'None' else None
 
+                # Format sender/receiver details safely
                 sender_name = entry.get('sender_name', '?')
                 sender_acc_id = entry.get('sender_account_id', '?')
                 receiver_name = entry.get('receiver_name', '?')
                 receiver_acc_id = entry.get('receiver_account_id', '?')
-                logging.debug(f"Formatting Sender: Name='{sender_name}', AccID='{sender_acc_id}'")
-                logging.debug(f"Formatting Receiver: Name='{receiver_name}', AccID='{receiver_acc_id}'")
+                sender_details = f"{sender_name} (Acc ID: {sender_acc_id})"
+                receiver_details = f"{receiver_name} (Acc ID: {receiver_acc_id})"
 
+                # Construct the final dictionary
                 details = {
-                    'log_id': entry['log_id'],
+                    'log_id': entry.get('log_id'), # Use .get() for safety
                     'sender_customer_id': entry.get('sender_cust_id'),
                     'receiver_customer_id': entry.get('receiver_cust_id'),
                     'timestamp': timestamp_display,
-                    'sender_details': f"{sender_name} (Account ID: {sender_acc_id})",
-                    'receiver_details': f"{receiver_name} (Account ID: {receiver_acc_id})",
+                    'sender_details': sender_details,
+                    'receiver_details': receiver_details,
                     'amount': amount_display,
                     'qkd_status': entry.get('qkd_status', 'N/A').replace('_', ' '),
                     'qber': qber_display,
-                    'encrypted_confirmation_data': encrypted_hex, # Holds actual data or None
+                    'encrypted_confirmation_data': enc_data, # Contains data or None
                     'is_flagged': is_flagged,
-                    'fraud_reason': reason_display, # Holds reason string or None/N/A
+                    'fraud_reason': reason_display, # Contains reason string or None
                 }
                 logging.debug(f"Formatted details dictionary for log {log_id}: {details}")
 
-            except (InvalidOperation, TypeError, ValueError) as format_err:
-                logging.error(f"Error formatting log details for log ID {log_id}: {format_err}")
-                details = None
-            except Exception as format_err:
-                 logging.error(f"Unexpected error formatting log {log_id}: {format_err}", exc_info=True)
+            except (InvalidOperation, TypeError, ValueError, KeyError) as format_err:
+                # Catch potential errors during formatting (KeyError if tuple fallback used incorrectly)
+                logging.error(f"Error formatting data for log ID {log_id}: {format_err}")
+                details = None # Set details to None if formatting fails
+            except Exception as format_err_other:
+                 logging.error(f"Unexpected error formatting log {log_id}: {format_err_other}", exc_info=True)
                  details = None
         else:
             logging.warning(f"Log entry with ID {log_id} not found in DB.")
-            details = None
+            details = None # Ensure details is None if entry not found
 
-    except MySQLError as e:
-        logging.error(f"Database error fetching details for log ID {log_id}: {e}", exc_info=True)
+    except DB_ERROR_TYPE as e: # Catch specific DB errors
+        logging.error(f"Database error ({db_type}) fetching details for log ID {log_id}: {e}", exc_info=True)
+        details = None # Ensure details is None on DB error
+    except ConnectionError as e: # Catch connection errors specifically
+        logging.error(f"Connection error fetching details for log ID {log_id}: {e}", exc_info=True)
         details = None
-    except Exception as e:
+    except Exception as e: # Catch other unexpected errors
          logging.error(f"Unexpected error fetching details for log {log_id}: {e}", exc_info=True)
          details = None
     finally:
-        if cursor:
-            try: cursor.close()
-            except MySQLError as cur_e: logging.error(f"Error closing log details cursor: {cur_e}")
-        close_db_connection(conn)
+        # --- Corrected Finally Block ---
+        if cursor and not getattr(cursor, 'closed', True): # Check cursor exists and not closed
+            try:
+                cursor.close()
+            except DB_ERROR_TYPE: # Use global DB_ERROR_TYPE
+                 # logging.warning(f"DBError closing get_details cursor: {db_close_err}") # Optional log
+                 pass # Ignore DB-specific errors during close
+            except Exception as cur_close_err: # Catch other potential close errors
+                logging.warning(f"Non-DB error closing get_details cursor: {cur_close_err}")
 
-    logging.info(f"--- Finished fetching log details for log_id: {log_id}. Returning: {'Details found' if details else 'None'} ---")
+        # Always close the connection if it was obtained and not closed
+        if conn and not getattr(conn, 'closed', True): # Check if conn was successfully assigned and not closed
+            close_db_connection(conn)
+        # --- End Corrected Cleanup ---
+
+    logging.info(f"--- Finished fetching log details {log_id}. Found: {bool(details)} ---")
     return details
+
 
 
 @app.route('/report/download/<int:log_id>')
