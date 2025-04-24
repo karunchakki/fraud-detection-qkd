@@ -2752,7 +2752,7 @@ def profile():
 def get_flagged_transactions(user_id, limit=50):
     """
     Fetches recently flagged transactions involving the user.
-    Adapted for PostgreSQL/MySQL.
+    Adapted for PostgreSQL/MySQL compatibility.
     """
     txns = [] # Initialize list for results
     conn = None # Initialize connection outside try
@@ -2762,10 +2762,11 @@ def get_flagged_transactions(user_id, limit=50):
     try:
         conn = get_db_connection() # Attempt to get connection
         if not conn:
+            # Log error but return empty list; let calling route handle UI feedback
             logging.error(f"DB Connection failed fetching flagged tx for user {user_id}")
-            return txns # Return empty list
+            return txns
 
-        # --- CORRECTED CURSOR CREATION ---
+        # --- Determine cursor type based on connection object ---
         if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
             cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDictCursor for PG
             db_type = "PostgreSQL"
@@ -2773,12 +2774,14 @@ def get_flagged_transactions(user_id, limit=50):
             cursor = conn.cursor(dictionary=True) # Use dictionary=True for MySQL
             db_type = "MySQL"
         else:
+            # Fallback if type unknown or driver missing
             logging.warning("get_flagged_transactions: Unknown DB connection type, using basic cursor.")
-            cursor = conn.cursor() # Fallback
+            cursor = conn.cursor()
             db_type = "Fallback"
         logging.debug(f"get_flagged_transactions: Using {db_type} cursor.")
-        # --- END CORRECTION ---
+        # --- End Cursor Creation ---
 
+        # SQL query remains the same, placeholders work for both
         sql = """
             SELECT
                 l.log_id, l.timestamp AS ts,
@@ -2790,34 +2793,62 @@ def get_flagged_transactions(user_id, limit=50):
             LEFT JOIN customers s_cust ON s.customer_id = s_cust.customer_id
             LEFT JOIN accounts r ON l.receiver_account_id = r.account_id
             LEFT JOIN customers r_cust ON r.customer_id = r_cust.customer_id
-            WHERE (s.customer_id = %s OR r.customer_id = %s)
-              AND l.is_flagged = TRUE
+            WHERE (s.customer_id = %s OR r.customer_id = %s) -- User involved as sender OR receiver
+              AND l.is_flagged = TRUE -- Only flagged transactions
             ORDER BY l.timestamp DESC
             LIMIT %s
             """
         cursor.execute(sql, (user_id, user_id, limit))
-        raw_flagged_txns = cursor.fetchall()
+        raw_flagged_txns = cursor.fetchall() # Fetch all results
 
-        # Process results safely (rest of the processing logic is likely okay as it uses .get())
+        # Process results safely using .get() for dictionary-like access
         for entry in raw_flagged_txns:
-             try:
-                 amt_val = entry.get('amount'); amt = Decimal(amt_val) if amt_val is not None else Decimal('0.00')
-                 ts_val = entry.get('ts'); ts_str = ts_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(ts_val, datetime.datetime) else 'N/A'
+             try: # Inner try to handle formatting errors for individual rows
+                 # Safely convert amount using Decimal(str())
+                 amt_val = entry.get('amount')
+                 amt = Decimal(str(amt_val)) if amt_val is not None else Decimal('0.00')
+
+                 # Safely format timestamp
+                 ts_val = entry.get('ts')
+                 ts_str = ts_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(ts_val, datetime.datetime) else 'N/A'
+
+                 # Append formatted dict to results list
                  txns.append({
-                     'id': entry.get('log_id'), 'timestamp': ts_str,
-                     'sender': f"{entry.get('sender', '?')}", 'receiver': f"{entry.get('receiver', '?')}",
-                     'amount': f"{amt:.2f}", 'fraud_reason': entry.get('fraud_reason', 'N/A')
+                     'id': entry.get('log_id'), # Use get for safety
+                     'timestamp': ts_str,
+                     'sender': f"{entry.get('sender', '?')}", # Use get for safety
+                     'receiver': f"{entry.get('receiver', '?')}",
+                     'amount': f"{amt:.2f}", # Format decimal
+                     'fraud_reason': entry.get('fraud_reason', 'N/A') # Use get with default
                  })
-             except Exception as fe: logging.warning(f"Error formatting flagged tx {entry.get('log_id', '?')}: {fe}")
+             except (InvalidOperation, TypeError, ValueError, KeyError) as fe:
+                 # Catch potential errors during formatting or dict access
+                 logging.warning(f"Error formatting flagged tx data {entry.get('log_id', '?')}: {fe}")
+             except Exception as fe_other: # Catch unexpected formatting errors
+                  logging.error(f"Unexpected error formatting flagged tx {entry.get('log_id', '?')}: {fe_other}", exc_info=True)
 
     except DB_ERROR_TYPE as e: # Catch specific DB errors
+        # Log the error, but don't flash here, return empty list
         logging.error(f"Flagged tx DB error ({db_type}) user {user_id}: {e}", exc_info=True)
+    except ConnectionError as e: # Catch connection errors specifically
+         logging.error(f"Flagged tx Connection error user {user_id}: {e}", exc_info=True)
     except Exception as e: # Catch other unexpected errors
         logging.error(f"Unexpected error loading flagged tx user {user_id}: {e}", exc_info=True)
     finally: # Ensure resources are always cleaned up
-        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
-        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
+        # Use safe cleanup logic
+        if cursor and not getattr(cursor, 'closed', True): # Check cursor exists and not closed
+            try:
+                cursor.close()
+            except DB_ERROR_TYPE: # Use global DB_ERROR_TYPE
+                 pass # Ignore DB-specific errors during close
+            except Exception as cur_close_err: # Catch other potential close errors
+                logging.warning(f"Non-DB error closing flagged_txns cursor: {cur_close_err}")
 
+        # Always close the connection if it was obtained and not closed
+        if conn and not getattr(conn, 'closed', True): # Check if conn was successfully assigned and not closed
+            close_db_connection(conn)
+
+    # Return the list of formatted transactions (might be empty if errors occurred)
     return txns
 
 @app.route('/fraud')
