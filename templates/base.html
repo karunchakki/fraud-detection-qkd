@@ -29,8 +29,13 @@
             colors: { // Define your color palette for easy reference
               primary: { '50': '#F8FAFC', '100': '#F1F5F9', '200': '#E2E8F0', '300': '#CBD5E1', '400': '#94A3B8', '500': '#64748B', '600': '#475569', '700': '#334155', '800': '#1E293B', '900': '#0F172A', '950': '#020617' },
               accent: { '50': '#ECFEFF', '100': '#CFFAFE', '200': '#A5F3FC', '300': '#67E8F9', '400': '#22D3EE', '500': '#06B6D4', '600': '#0891B2', '700': '#0E7490', '800': '#155E75', '900': '#164E63', '950': '#083344' },
-              neutral: { '50': '#F9FAFB', '100': '#F3F4F6', '200': '#E5E7EB', '300': '#D1D5DB', '400': '#9CA3AF', '500': '#6B7280', '600': '#4B5563', '700': '#374151', '800': '#1F2937', '900': '#111827', '950': '#030712', }
+              neutral: { '50': '#F9FAFB', '100': '#F3F4F6', '200': '#E5E7EB', '300': '#D1D5DB', '400': '#9CA3AF', '500': '#6B7280', '600': '#4B5563', '700': '#374151', '800': '#1F2937', '900': '#111827', '950': '#030712', },
               // Add more colors like success, warning, danger if needed
+              // Ensure these match the flash message background classes
+              success: { '100': '#D1FAE5', '700': '#047857', '900': '#064E3B', '300': '#6EE7B7' }, // Example for green
+              warning: { '100': '#FEF3C7', '700': '#B45309', '900': '#78350F', '300': '#FCD34D' }, // Example for yellow
+              danger:  { '100': '#FEE2E2', '700': '#B91C1C', '900': '#7F1D1D', '300': '#FCA5A5' }, // Example for red
+              info:    { '100': '#DBEAFE', '700': '#1D4ED8', '900': '#1E3A8A', '300': '#93C5FD' }  // Example for blue (else case)
             }
           }
         },
@@ -46,6 +51,7 @@
 
     {# ---- YOUR Custom Stylesheet (Loads AFTER Tailwind) ---- #}
     {# This allows you to override Tailwind defaults or add custom component styles #}
+    {# Ensure this file exists or remove the link #}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
     {# ---- Page-Specific Head Elements ---- #}
@@ -89,6 +95,7 @@
                 {% set icon_active = 'text-neutral-500 dark:text-neutral-300' %}
 
                 {# Links visible when logged in #}
+                {# Uses session_user which is injected via context_processor #}
                 {% if session_user %}
                     <a href="{{ url_for('index') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'index' else normal_class }}">
                         <svg class="{{ icon_base }} {{ icon_active if request.endpoint == 'index' else icon_normal }}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
@@ -143,14 +150,15 @@
                 {% endif %}
             </nav>
 
-            {# Sidebar Footer (Inside the scroll container, **mt-auto REMOVED**) #}
-            <div class="flex-shrink-0 border-t border-neutral-200 dark:border-primary-800 p-4"> {# Removed mt-auto #}
+            {# Sidebar Footer (Inside the scroll container, pushes to bottom) #}
+            {# mt-auto PUSHES this section to the bottom of the flex container #}
+            <div class="flex-shrink-0 border-t border-neutral-200 dark:border-primary-800 p-4 mt-auto">
                  <div class="flex-shrink-0 w-full group block">
                     <div class="flex items-center">
                         {# User Info (if logged in) #}
                         {% if session_user %}
                         <div class="flex-grow">
-                             <p class="text-sm font-medium text-neutral-700 dark:text-neutral-200">{{ session_user.name }}</p>
+                             <p class="text-sm font-medium text-neutral-700 dark:text-neutral-200 truncate" title="{{ session_user.name }}">{{ session_user.name }}</p>
                              <p class="text-xs font-medium text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300 truncate" title="{{ session_user.email }}">{{ session_user.email }}</p>
                              <a href="{{ url_for('logout') }}" class="text-xs font-medium text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300">Logout</a>
                         </div>
@@ -201,10 +209,39 @@
 
         {# Main Content - Scrollable Area #}
         <main class="flex-1 relative z-0 overflow-y-auto focus:outline-none py-6 px-4 sm:px-6 lg:px-8" id="main-content">
-             {# Flash messages are included here #}
-             {% block flashes %}
-                {% include 'partials/_flashes.html' ignore missing %} {# Use ignore missing in case partial doesn't exist #}
-             {% endblock flashes %}
+
+             <!-- ======================================= -->
+             <!-- === START: Flash Messages Area === -->
+             <!-- ======================================= -->
+             {# This block renders messages flashed from Flask routes #}
+             {# Uses a container for consistent padding/margins #}
+             <div class="container mx-auto px-4 py-2 mb-4"> {# Adjusted padding/margin #}
+                 {% with messages = get_flashed_messages(with_categories=true) %}
+                     {% if messages %}
+                         {% for category, message in messages %}
+                         {# Renders each message with category-specific styling #}
+                         <div class="p-4 mb-2 text-sm rounded-lg shadow-md {# Added bottom margin and shadow #}
+                                     {% if category == 'danger' or category == 'error' %} bg-red-100 dark:bg-danger-900 text-red-700 dark:text-danger-300 border-l-4 border-red-500 dark:border-danger-500 {# Danger/Error style #}
+                                     {% elif category == 'warning' %} bg-yellow-100 dark:bg-warning-900 text-yellow-700 dark:text-warning-300 border-l-4 border-yellow-500 dark:border-warning-500 {# Warning style #}
+                                     {% elif category == 'success' %} bg-green-100 dark:bg-success-900 text-green-700 dark:text-success-300 border-l-4 border-green-500 dark:border-success-500 {# Success style #}
+                                     {% else %} bg-blue-100 dark:bg-info-900 text-blue-700 dark:text-info-300 border-l-4 border-blue-500 dark:border-info-500 {# Default/Info style #}
+                                     {% endif %}"
+                              role="alert">
+                             <span class="font-medium">
+                                 {% if category == 'danger' or category == 'error' %}Error!
+                                 {% elif category == 'warning' %}Warning!
+                                 {% elif category == 'success' %}Success!
+                                 {% else %}Info:{% endif %}
+                             </span> {{ message }}
+                         </div>
+                         {% endfor %}
+                     {% endif %}
+                 {% endwith %}
+             </div> {# End Flash Messages Container #}
+             <!-- ======================================= -->
+             <!-- === END: Flash Messages Area === -->
+             <!-- ======================================= -->
+
 
              {# Main content block for child templates #}
              {% block content %}
@@ -280,6 +317,7 @@
 
 {# --- Global JavaScript --- #}
 {# Load your main JS file containing theme toggle and sidebar logic #}
+{# Make sure this file exists and contains the necessary logic #}
 <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 
 {# Block for page-specific scripts to be included by child templates #}
