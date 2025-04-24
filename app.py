@@ -683,13 +683,27 @@ def get_user_by_email(email):
             else: logging.error(f"Fetched user_row unexpected format: {type(user_row)}")
         # --- END SAFER CONVERSION ---
 
-    except DB_ERROR_TYPE as e: logging.error(f"DB Error fetch user {email} ({db_type}): {e}"); user = None
-    except ConnectionError as e: logging.error(f"Conn error fetch user {email}: {e}"); user = None
-    except Exception as e: logging.error(f"Unexpected error fetch user {email}: {e}", exc_info=True); user = None
+    except (DB_ERROR_TYPE, ConnectionError) as e:
+        logging.error(f"Error fetch user {email} ({db_type}): {e}"); user = None
+    except Exception as e:
+        logging.error(f"Unexpected error fetch user {email}: {e}", exc_info=True); user = None
     finally:
-        # Use safe cleanup
-        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
-        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
+        # --- Start of Corrected Cleanup ---
+        if cursor and not getattr(cursor, 'closed', True):
+            try:
+                cursor.close()
+            except DB_ERROR_TYPE:
+                 # Optionally log this specific DB error if needed, but often ignored during close
+                 # logging.warning(f"DBError closing cursor for get_user_by_email: {db_close_err}")
+                 pass # Ignore DB-specific errors during close
+            except Exception as cur_close_err:
+                 # Log other unexpected errors during close
+                 logging.warning(f"Non-DB error closing cursor for get_user_by_email: {cur_close_err}")
+
+        if conn and not getattr(conn, 'closed', True):
+            close_db_connection(conn) # Use your helper function to close connection
+        # --- End of Corrected Cleanup ---
+
     return user
 
 def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value=None, fraud_reason=None, exception_info=None):
