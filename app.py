@@ -395,12 +395,9 @@ if WTFORMS_AVAILABLE:
     class RegistrationForm(FlaskForm):
          customer_name = StringField('Full Name', validators=[DataRequired(), Length(min=2, max=100)], filters=[lambda x: x.strip() if x else x])
          email = EmailField('Email Address', validators=[DataRequired(), Email()], filters=[lambda x: x.strip().lower() if x else x])
-         # *** ADD THIS LINE ***
-         phone_number = StringField('Phone Number', validators=[Optional(), Length(min=10, max=20)]) # Added Optional() validator
-         # *** END ADDITION ***
+         phone_number = StringField('Phone Number', validators=[Optional(), Length(min=10, max=20)]) # Optional validator allows empty
          password = PasswordField('Password', validators=[DataRequired(), Length(min=8)])
          confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password', message='Passwords must match.')])
-         # OTP and CAPTCHA fields are still omitted from the form class
          submit = SubmitField('Register Account')
 
     class ForgotPasswordForm(FlaskForm):
@@ -413,11 +410,16 @@ if WTFORMS_AVAILABLE:
         submit = SubmitField('Reset Password')
 
     class TransferForm(FlaskForm):
-        # Use StringField for SelectField value consistency, coerce in route if needed
-        receiver_account_id = SelectField('Recipient Account', validators=[InputRequired(message="Please select a recipient.")])
-        amount = DecimalField('Amount', places=2, rounding=None,
+        # REMOVED coerce=int - We will handle conversion explicitly in the route after validation
+        # Use InputRequired to ensure *a* value is selected (not the placeholder)
+        receiver_account_id = SelectField('Recipient Account',
+                                          validators=[InputRequired(message="Please select a recipient.")])
+        amount = DecimalField('Amount (₹)', # Added currency symbol to label
+                             places=2,
+                             rounding=None, # Use default rounding (usually ROUND_HALF_UP)
                              validators=[InputRequired(message="Amount is required."),
-                                         NumberRange(min=0.01, message="Amount must be at least ₹0.01.")]) # Updated message
+                                         # Ensure min value is Decimal for comparison
+                                         NumberRange(min=Decimal('0.01'), message="Amount must be at least ₹0.01.")])
         simulate_eve = BooleanField('Simulate Eavesdropper (Higher QBER)')
         submit = SubmitField('Initiate Secure Transfer')
 
@@ -440,19 +442,23 @@ else:
              # Attempt to simulate field access
              field_data = None
              is_checkbox = name == 'simulate_eve' # Example specific checkbox handling
+             form_source = self._formdata or (request.form if request else None) # Check request exists
 
-             if request and request.form:
+             if form_source:
                  if is_checkbox:
-                     field_data = name in request.form # Checkbox presence
-                 elif name in request.form:
-                      field_data = request.form[name]
-             elif self._formdata: # Check formdata passed during init
-                 if is_checkbox:
-                     field_data = name in self._formdata
-                 elif name in self._formdata:
-                      field_data = self._formdata[name]
+                     field_data = name in form_source # Checkbox presence
+                 elif name in form_source:
+                      field_data = form_source[name]
 
-             # Return a simple object that has a 'data' attribute
+             # Attempt basic type coercion for dummy fields to mimic WTForms
+             if name == 'receiver_account_id':
+                  try: field_data = int(field_data) if field_data else None
+                  except (ValueError, TypeError): field_data = None # Default to None on error
+             elif name == 'amount':
+                  try: field_data = Decimal(field_data) if field_data else None
+                  except (InvalidOperation, TypeError): field_data = None # Default to None on error
+
+             # Return a simple object that has a 'data' attribute and empty errors list
              field_obj = type('DummyField', (object,), {'data': field_data, 'errors': []})()
              return field_obj
 
