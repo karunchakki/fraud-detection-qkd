@@ -1767,16 +1767,24 @@ def transfer_funds():
         rx_name = rx_info['customer_name']; last_outcome['receiver_name'] = rx_name
 
         # Fraud Detection
-        log_status = "FRAUD_CHECK"; logging.info("Running fraud check...")
-        hist_ml = [] # Fetch history... (code omitted for brevity)
-        current_txn_data = {'amount': amount, 'recipient_username': rx_name, 'timestamp': datetime.datetime.now()} # Ensure feature names match model training
-        try: fraud_res = detect_fraud(current_txn_data, hist_ml, **{'blacklist': app.config['FRAUD_BLACKLIST']})
-        except Exception as fraud_err: logging.error(f"Fraud check failed: {fraud_err}"); fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check Error'}; flash("Warning: Fraud check error.", "warning")
-        last_outcome['fraud_check'] = fraud_res; is_fraudulent_ml = fraud_res.get('is_fraudulent', False); ml_reason = fraud_res.get('reason')
-        final_reason = qkd_fraud_reason or (ml_reason if is_fraudulent_ml else None)
-        final_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml
-        if final_flagged: logging.warning(f"ALERT: {final_reason}") else: logging.info("Checks passed.")
-        qkd_status = "SECURED_FLAGGED" if final_flagged else "SECURED"; last_outcome['qkd_status_msg'] = qkd_status.replace('_',' ')
+        last_outcome['fraud_check'] = fraud_res
+        is_fraudulent_ml = fraud_res.get('is_fraudulent', False)
+        ml_fraud_reason = fraud_res.get('reason')
+        final_fraud_reason = qkd_fraud_reason # QKD reason takes precedence
+        if is_fraudulent_ml:
+             if not final_fraud_reason: final_fraud_reason = ml_fraud_reason
+             elif ml_fraud_reason and ml_fraud_reason != qkd_fraud_reason: final_fraud_reason += f"; {ml_fraud_reason}" # Combine reasons
+        final_is_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml # Flagged if QKD alert OR fraud detected
+
+        # --- CORRECTED IF/ELSE SYNTAX ---
+        if final_is_flagged:
+            logging.warning(f"ALERT: {final_fraud_reason}")
+        else:
+            logging.info("Fraud check passed and no QKD alert.")
+        # --- END CORRECTION ---
+
+        qkd_status_final = "SECURED_FLAGGED" if final_is_flagged else "SECURED"
+        last_outcome['qkd_status_msg'] = qkd_status_final.replace('_',' ')
 
         # Encrypt Confirmation
         log_status = "ENCRYPTING"; msg_enc = f"CONF;{sender_id}>{receiver_id};AMT:{amount:.2f};QBER:{qber_disp};F:{final_flagged};R:{final_reason or 'N/A'};T:{datetime.datetime.now().isoformat()}"
