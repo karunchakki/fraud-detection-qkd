@@ -1671,30 +1671,88 @@ def transfer_funds():
         except Exception as alert_err: current_app.logger.error(f"Error in eavesdropper alerting routine: {alert_err}", exc_info=True)
 
     # --- 2. QKD Simulation ---
-    qber_thresh = app.config['QBER_THRESHOLD']; n_qubits = app.config['QKD_NUM_QUBITS']; eve_rate = 0.25 if simulate_eve_checked else 0.0; qkd_fraud_reason = None
+    # Get configuration values
+    qber_thresh = app.config['QBER_THRESHOLD']
+    n_qubits = app.config['QKD_NUM_QUBITS']
+    eve_rate = 0.25 if simulate_eve_checked else 0.0
+    qkd_fraud_reason = None # Specific reason if QKD indicates high QBER
+
     try:
-        log_status = "QKD_RUNNING"; logging.info(f"Running QKD: N={n_qubits}, Eve={simulate_eve_checked}, Rate={eve_rate:.3f}, Thresh={qber_thresh:.3f}")
-        sim_res = simulate_bb84(n_qubits=n_qubits, simulate_eve=simulate_eve_checked, qber_threshold=qber_thresh, eve_interception_rate=eve_rate)
-        session[f'last_qkd_log_{logged_in_user_id}'] = sim_res; session.modified = True; last_outcome['qkd_log_stored'] = True
-        key_bin = sim_res.get('final_key_binary'); qber = sim_res.get('qber', -1.0); eve_det = sim_res.get('eve_detected', False)
-        qber_disp = f"{qber:.4f}" if qber >= 0 else 'N/A'; last_outcome['qber'] = qber_disp; key_len = len(key_bin or '')
+        log_status = "QKD_RUNNING"
+        logging.info(f"Running QKD simulation: N={n_qubits}, Eve={simulate_eve_checked}, Rate={eve_rate:.3f}, Thresh={qber_thresh:.3f}")
+
+        # Call the simulation function (ensure simulate_bb84 is imported)
+        sim_res = simulate_bb84(
+            n_qubits=n_qubits,
+            simulate_eve=simulate_eve_checked,
+            qber_threshold=qber_thresh,
+            eve_interception_rate=eve_rate
+        )
+
+        # Store result in session and update outcome tracking
+        session[f'last_qkd_log_{logged_in_user_id}'] = sim_res
+        session.modified = True
+        last_outcome['qkd_log_stored'] = True
+
+        # Extract results safely using .get()
+        key_bin = sim_res.get('final_key_binary')
+        qber = sim_res.get('qber', -1.0) # Default to -1 if key missing
+        eve_det = sim_res.get('eve_detected', False) # Default to False if key missing
+
+        # Format QBER for display (handle potential None or negative values)
+        qber_disp = f"{qber:.4f}" if qber is not None and qber >= 0 else 'N/A'
+        last_outcome['qber'] = qber_disp
+        key_len = len(key_bin or '') # Calculate key length safely
         logging.info(f"QKD Result: QBER={qber_disp}, EveDetected={eve_det}, KeyLen={key_len}")
-        min_key_len = 128 # Example minimum key length
-        if qber < 0: qkd_fail_reason = f"QKD Sim Error ({qber})"; log_status = "QKD_SIM_ERR"
-        elif eve_det: qkd_fail_reason = f"High QBER ({qber_disp}) > Thresh ({qber_thresh:.3f}). Eavesdropping Likely."; log_status = "QKD_EVE_DETECTED"; qkd_fraud_reason = "QKD Alert: High QBER"
-        elif not key_bin or key_len < min_key_len: qkd_fail_reason = f"Key too short ({key_len}b < {min_key_len}b)"; log_status = "QKD_KEY_INSUFFICIENT"
-        if qkd_fail_reason: raise ValueError(f"QKD Failed: {qkd_fail_reason}")
-        key_hash = hashlib.sha256(key_bin.encode('utf-8')).digest(); qkd_key = base64.urlsafe_b64encode(key_hash)
-        logging.info(f"QKD OK (QBER:{qber_disp}). Key derived."); log_status = "QKD_SUCCESS"; last_outcome['qkd_status_msg'] = "Secure Channel OK"
-    except ValueError as qkd_e: # Catch specific QKD errors
-        flash(f"Transfer Aborted: {qkd_e}", "danger"); last_outcome.update({'status': 'Failed', 'reason': qkd_fail_reason or str(qkd_e), 'qkd_status_msg': log_status})
+
+        # --- Check QKD failure conditions ---
+        min_key_len = 128 # Define minimum acceptable key length
+        qkd_fail_reason = None # Reset fail reason for this check
+
+        if qber is None or qber < 0: # Check for simulation error indicator
+            qkd_fail_reason = f"QKD Simulation Error (Code: {qber}). Check parameters/logs."
+            log_status = "QKD_SIM_ERR"
+        elif eve_det: # Check if simulation explicitly detected Eve (QBER exceeded threshold)
+            qkd_fail_reason = f"High QBER ({qber_disp}) > Threshold ({qber_thresh:.3f}). Potential Eavesdropping."
+            log_status = "QKD_EVE_DETECTED"
+            qkd_fraud_reason = "QKD Alert: High QBER" # Set specific reason for fraud flagging
+        elif not key_bin or key_len < min_key_len: # Check if key is missing or too short
+            qkd_fail_reason = f"Generated key too short ({key_len} bits, requires {min_key_len})."
+            log_status = "QKD_KEY_INSUFFICIENT"
+
+        # If any failure condition was met, raise a ValueError to be caught below
+        if qkd_fail_reason:
+            raise ValueError(f"QKD Failed: {qkd_fail_reason}")
+
+        # --- QKD Success: Derive Fernet key ---
+        # Ensure hashlib and base64 are imported at the top of app.py
+        key_hash = hashlib.sha256(key_bin.encode('utf-8')).digest() # SHA-256 hash (32 bytes)
+        qkd_key = base64.urlsafe_b64encode(key_hash) # Base64 encode for Fernet compatibility
+        logging.info(f"QKD OK (QBER:{qber_disp}). Fernet key derived.")
+        log_status = "QKD_SUCCESS"
+        last_outcome['qkd_status_msg'] = "Secure Channel OK"
+
+    except ValueError as qkd_e: # Catch specific QKD errors raised above
+        logging.warning(f"QKD Failure: {qkd_e}")
+        flash(f"Transfer Aborted: {qkd_e}", "danger") # Show specific reason to user
+        last_outcome.update({'status': 'Failed', 'reason': qkd_fail_reason or str(qkd_e), 'qkd_status_msg': log_status})
+        # Ensure log_failed_attempt exists and handles arguments correctly
         log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber >=0 else None, fraud_reason=qkd_fraud_reason, exception_info=qkd_e)
-        session['last_transfer_outcome'] = last_outcome; session.modified = True; return redirect(url_for('index'))
-    except Exception as qkd_e: # Catch unexpected QKD errors
-        logging.error(f"Unexpected QKD Error: {qkd_e}", exc_info=True); log_status = "QKD_INTERNAL_ERR"
-        flash('Transfer Aborted: Secure channel error.', 'danger'); last_outcome.update({'status': 'Failed', 'reason': 'QKD Error', 'qkd_status_msg': log_status})
+        session['last_transfer_outcome'] = last_outcome; session.modified = True
+        # Ensure parentheses are balanced in the redirect call
+        return redirect(url_for('index'))
+
+    except Exception as qkd_e: # Catch unexpected errors during QKD simulation/processing
+        logging.error(f"Unexpected QKD Error: {qkd_e}", exc_info=True)
+        log_status = "QKD_INTERNAL_ERR"
+        flash('Transfer Aborted: Secure channel establishment encountered an internal error.', 'danger')
+        last_outcome.update({'status': 'Failed', 'reason': 'QKD Internal Error', 'qkd_status_msg': log_status})
+        # Ensure log_failed_attempt exists and handles arguments correctly
         log_failed_attempt(sender_id, receiver_id, amount, log_status, exception_info=qkd_e)
-        session['last_transfer_outcome'] = last_outcome; session.modified = True; return redirect(url_for('index'))
+        session['last_transfer_outcome'] = last_outcome; session.modified = True
+        # Ensure parentheses are balanced in the redirect call
+        return redirect(url_for('index'))
+
 
     # --- 3. DB Transaction, Fraud Check, Finalize ---
     conn = None; cursor = None; needs_rollback = False; log_id = None; db_type = "Unknown"
