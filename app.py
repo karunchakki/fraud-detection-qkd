@@ -478,7 +478,6 @@ def get_db_connection():
         try:
             logging.debug("Attempting PostgreSQL connection via DATABASE_URL.")
             conn = psycopg2.connect(db_url, connect_timeout=10)
-            
             logging.info("PostgreSQL connection successful.")
             return conn
         except psycopg2.Error as e: logging.critical(f"CRITICAL PG Conn Error: {e}"); return None
