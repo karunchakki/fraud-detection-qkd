@@ -478,7 +478,7 @@ def get_db_connection():
         try:
             logging.debug("Attempting PostgreSQL connection via DATABASE_URL.")
             conn = psycopg2.connect(db_url, connect_timeout=10)
-            conn.driver_name = 'psycopg2' # <--- SET ATTRIBUTE HERE
+            
             logging.info("PostgreSQL connection successful.")
             return conn
         except psycopg2.Error as e: logging.critical(f"CRITICAL PG Conn Error: {e}"); return None
@@ -1552,7 +1552,6 @@ def transfer_funds():
     """Handles the fund transfer process including QKD and Fraud Check."""
     # --- Variable Initialization ---
     sender_id = None; receiver_id = None; amount = None; simulate_eve_checked = False
-    # Ensure g.user is populated correctly by before_request/user_loader
     if not g.user or 'id' not in g.user:
         flash("User session error. Please log in again.", "error")
         return redirect(url_for('login'))
@@ -1561,62 +1560,46 @@ def transfer_funds():
     qkd_key = None; sim_res = {}; qber = -1.0; qkd_fail_reason = None
     log_status = "INITIATED"; fraud_res = {'is_fraudulent': False, 'reason': None, 'ml_score': -1.0}
     last_outcome = {'timestamp': datetime.datetime.now().isoformat(), 'status': 'Pending', 'reason': ''}
-    session.pop('last_transfer_outcome', None) # Clear previous outcome
+    session.pop('last_transfer_outcome', None)
 
     # --- 1. Input Validation & Form Handling ---
     try:
-        # Get Sender Account (Needs to happen first)
         user_accounts = get_accounts_data(customer_id_filter=logged_in_user_id)
         if user_accounts is None: raise ConnectionError("DB error fetching sender account.")
         if not user_accounts: raise ValueError("Sender account details not found.")
-        sender_account = user_accounts[0] # Assuming the first account is the sender's primary
+        sender_account = user_accounts[0]
         sender_id = sender_account.get('account_id')
         if sender_id is None: raise ValueError("Sender account ID missing.")
         last_outcome['sender_id'] = sender_id
 
-        # Handle Form Submission Data
         if WTFORMS_AVAILABLE:
             logging.debug("WTForms available, processing form.")
-            transfer_form = TransferForm(request.form) # Instantiate with POST data
-
-            # Dynamically populate choices BEFORE validation
+            transfer_form = TransferForm(request.form)
             all_accounts = get_accounts_data()
-            if all_accounts is None: raise ConnectionError("Recipient list fetch error during validation setup.")
-            # Use STRINGS for choice keys/values as HTML form values are strings
+            if all_accounts is None: raise ConnectionError("Recipient list fetch error.")
+            # Use STRINGS for choice values
             recipients = [(str(acc['account_id']), f"{acc.get('customer_name','Unknown')} (ID:{acc['account_id']})")
                           for acc in all_accounts if acc.get('customer_id') != logged_in_user_id and acc.get('account_id')]
-            transfer_form.receiver_account_id.choices = [('', '-- Select Recipient --')] + recipients # Set choices on the instance
+            transfer_form.receiver_account_id.choices = [('', '-- Select Recipient --')] + recipients
 
-            if transfer_form.validate_on_submit(): # Validate the submitted data
+            if transfer_form.validate_on_submit():
                 logging.debug("WTForms validation successful.")
-                # Get the raw data (likely string for SelectField unless coerced earlier)
-                receiver_id_str_or_int = transfer_form.receiver_account_id.data # Let's check its type
-                amount = transfer_form.amount.data # Should be Decimal
-                simulate_eve_checked = transfer_form.simulate_eve.data # Should be bool
+                receiver_id_str_or_int = transfer_form.receiver_account_id.data
+                amount = transfer_form.amount.data
+                simulate_eve_checked = transfer_form.simulate_eve.data
 
-                # --- EXPLICIT CONVERSION & TYPE CHECK AFTER VALIDATION ---
-                if not receiver_id_str_or_int: # Check if it's empty (e.g., placeholder submitted)
-                     logging.error("WTForms validation passed, but receiver_id data is empty.")
-                     raise ValueError("Please select a valid recipient.")
-
+                if not receiver_id_str_or_int: raise ValueError("Please select a valid recipient.")
                 try:
-                    # Attempt to convert the validated ID data to an integer
-                    receiver_id = int(receiver_id_str_or_int)
-                    logging.debug(f"Successfully converted/validated receiver_id '{receiver_id_str_or_int}' to int: {receiver_id}")
-                except (ValueError, TypeError):
-                     # This might happen if data isn't a string or int convertible string
-                     logging.error(f"Failed to convert validated receiver_id data '{receiver_id_str_or_int}' (type: {type(receiver_id_str_or_int)}) to int.")
-                     raise ValueError("Invalid recipient ID data received.")
-                # --- END EXPLICIT CONVERSION ---
+                    receiver_id = int(receiver_id_str_or_int) # Explicit conversion
+                except (ValueError, TypeError): raise ValueError("Invalid recipient ID data received.")
 
             else: # WTForms validation failed
-                 # Nicely format WTForms errors for flashing
                  error_msg = "; ".join([f"{field.replace('_',' ').title()}: {', '.join(errs)}"
                                          for field, errs in transfer_form.errors.items()])
                  logging.warning(f"WTForms validation failed: {transfer_form.errors}")
                  raise ValueError(f"Invalid input: {error_msg}")
 
-        else: # Manual parsing if WTForms unavailable
+        else: # Manual parsing
             logging.debug("WTForms not available, using manual parsing.")
             receiver_id_str = request.form.get('receiver_account_id'); amount_str = request.form.get('amount'); simulate_eve_checked = 'simulate_eve' in request.form
             if not receiver_id_str: raise ValueError("Please select a recipient account.")
@@ -1626,64 +1609,45 @@ def transfer_funds():
             try: amount = Decimal(amount_str.strip())
             except InvalidOperation: raise ValueError("Invalid amount format (e.g., 100.50).")
 
-        # --- Common Validations (Post-Parsing/Validation) ---
-        # Now check if receiver_id is successfully an integer
-        if not isinstance(receiver_id, int):
-            # This means either manual parsing failed or WTForms path failed conversion/check
-            raise ValueError("Internal Error: Recipient ID is invalid or missing after processing.")
-        if sender_id == receiver_id:
-            raise ValueError("Cannot transfer funds to your own account.")
-        if amount is None or not isinstance(amount, Decimal) or amount <= 0:
-            raise ValueError("Amount must be a positive value (e.g., greater than 0.00).")
+        # --- Common Validations ---
+        if not isinstance(receiver_id, int): raise ValueError("Internal Error: Recipient ID invalid.")
+        if sender_id == receiver_id: raise ValueError("Cannot transfer funds to self.")
+        if amount <= 0: raise ValueError("Amount must be positive.")
 
-        # --- Input Validated Successfully ---
         last_outcome.update({'amount': f"{amount:.2f}", 'receiver_id': receiver_id, 'simulate_eve': simulate_eve_checked})
-        log_status = "INPUT_VALIDATED"
-        logging.info(f"Transfer Request Validated: ₹{amount:.2f} from Acc {sender_id} to Acc {receiver_id} (Simulate Eve: {simulate_eve_checked})")
+        log_status = "INPUT_VALIDATED"; logging.info(f"Transfer Validated: ₹{amount:.2f} from {sender_id} to {receiver_id} (SimEve: {simulate_eve_checked})")
 
     except (ValueError, ConnectionError, TypeError, InvalidOperation, KeyError) as e:
-        # Handle specific input, connection, or data type errors
-        logging.warning(f"Transfer input/setup failed: {e}", exc_info=(isinstance(e, ConnectionError)))
-        flash(f"Transfer Failed: {e}", "error")
-        last_outcome.update({'status': 'Failed', 'reason': f"Input/Setup Error: {str(e)[:100]}"})
+        flash(f"Transfer Failed: {e}", "error"); last_outcome.update({'status': 'Failed', 'reason': f"Input Error: {str(e)[:100]}"})
         session['last_transfer_outcome'] = last_outcome; session.modified = True
-        # Ensure amount is Decimal before logging failure
-        amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
-        log_failed_attempt(sender_id, receiver_id, amount_for_log, "INPUT_ERROR", exception_info=e)
+        log_failed_attempt(sender_id, receiver_id, amount if isinstance(amount, Decimal) else Decimal('0.00'), "INPUT_ERROR", exception_info=e)
         return redirect(url_for('index'))
     except Exception as e:
-         # Catch any other unexpected errors during the input phase
-         logging.error(f"Unexpected error during transfer input validation: {e}", exc_info=True)
-         flash("An unexpected error occurred while processing your request.", "error")
-         last_outcome.update({'status': 'Failed', 'reason': "Unexpected Input Error"})
-         session['last_transfer_outcome'] = last_outcome; session.modified = True
-         amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
-         log_failed_attempt(sender_id, receiver_id, amount_for_log, "UNEXPECTED_INPUT_ERR", exception_info=e)
-         return redirect(url_for('index'))
+        logging.error(f"Unexpected input error: {e}", exc_info=True); flash("Unexpected error.", "error"); last_outcome.update({'status': 'Failed', 'reason': "Unexpected Input Error"})
+        session['last_transfer_outcome'] = last_outcome; session.modified = True
+        log_failed_attempt(sender_id, receiver_id, amount if isinstance(amount, Decimal) else Decimal('0.00'), "UNEXPECTED_INPUT_ERR", exception_info=e)
+        return redirect(url_for('index'))
 
-    # --- Eavesdropper Alert (Updated Content) ---
+    # --- Eavesdropper Alert ---
     if simulate_eve_checked:
         try:
             ip_address = None
-            # Check if running on Render (using the 'RENDER' env var Render sets)
-            if 'RENDER' in os.environ:
-                # Generate a simulated IP for the demo when on Render
-                octet1 = random.choice([10, 172, 192, random.randint(1, 223)])
+            if 'RENDER' in os.environ: # Check if on Render
+                # Generate simulated IP
+                octet1 = random.choice([10, 172, 192, random.randint(1, 223)]); octet3 = random.randint(0, 254); octet4 = random.randint(1, 254)
                 if octet1 == 172: octet2 = random.randint(16, 31)
                 elif octet1 == 192: octet2 = 168
                 else: octet2 = random.randint(0, 254)
-                octet3 = random.randint(0, 254); octet4 = random.randint(1, 254)
                 ip_address = f"{octet1}.{octet2}.{octet3}.{octet4}"
                 logging.info(f"Simulating eavesdropper IP on Render: {ip_address}")
-            else:
-                # If not on Render (i.e., running locally), get the actual IP
+            else: # Locally
                 ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
                 logging.info(f"Detected local IP for simulated eavesdropper: {ip_address}")
 
             user_name = g.user.get('name', 'Unknown'); user_id_alert = g.user.get('id', 'N/A')
             alert_subject = "🚨 URGENT: Potential Eavesdropping Detected (Simulated) on QuantumVault Transaction"
             alert_log = f"User:{user_name}({user_id_alert}), IP:{ip_address}, Tx:{sender_id}->{receiver_id}, Amt:₹{amount:.2f}"
-            email_body = f"QuantumVault Security Alert\n\nWARNING: Potential eavesdropping activity detected from IP address: {ip_address}\n\nThis alert triggered by 'Simulate Eavesdropper' option.\n\nActivity Details:\nUser: {user_name} ({user_id_alert})\nSource IP: {ip_address}\nAction: Fund Transfer Attempt\nFrom Acc ID: {sender_id}\nTo Acc ID: {receiver_id}\nAmount: ₹{amount:.2f}\n\nReview simulated activity.\n\nQuantumVault Security Monitoring"
+            email_body = f"QuantumVault Security Alert\n\nWARNING: Potential eavesdropping activity detected from IP address: {ip_address}\n\nTriggered by 'Simulate Eavesdropper'.\n\nDetails:\nUser: {user_name} ({user_id_alert})\nIP: {ip_address}\nAction: Transfer Attempt\nFrom:{sender_id}, To:{receiver_id}, Amt:₹{amount:.2f}\n\nQuantumVault Security Monitoring"
             current_app.logger.warning(f"{alert_subject} - {alert_log}")
             flash(f"⚠️ Simulating Eavesdropper from IP: {ip_address}. Expect high QBER.", 'warning')
             admin_email = os.environ.get('ADMIN_ALERT_EMAIL')
@@ -1699,8 +1663,7 @@ def transfer_funds():
         except Exception as alert_err: current_app.logger.error(f"Error in eavesdropper alerting: {alert_err}", exc_info=True)
 
     # --- 2. QKD Simulation ---
-    qber_thresh = app.config['QBER_THRESHOLD']; n_qubits = app.config['QKD_NUM_QUBITS']
-    eve_rate = 0.25 if simulate_eve_checked else 0.0; qkd_fraud_reason = None
+    qber_thresh = app.config['QBER_THRESHOLD']; n_qubits = app.config['QKD_NUM_QUBITS']; eve_rate = 0.25 if simulate_eve_checked else 0.0; qkd_fraud_reason = None
     try:
         log_status = "QKD_RUNNING"; logging.info(f"Running QKD: N={n_qubits}, Eve={simulate_eve_checked}, Rate={eve_rate:.3f}, Thresh={qber_thresh:.3f}")
         sim_res = simulate_bb84(n_qubits=n_qubits, simulate_eve=simulate_eve_checked, qber_threshold=qber_thresh, eve_interception_rate=eve_rate)
@@ -1708,18 +1671,18 @@ def transfer_funds():
         key_bin = sim_res.get('final_key_binary'); qber = sim_res.get('qber', -1.0); eve_det = sim_res.get('eve_detected', False)
         qber_disp = f"{qber:.4f}" if qber >= 0 else 'N/A'; last_outcome['qber'] = qber_disp; key_len = len(key_bin or '')
         logging.info(f"QKD Result: QBER={qber_disp}, EveDetected={eve_det}, KeyLen={key_len}")
-        min_key_len = 128 # Set minimum acceptable key length
+        min_key_len = 128
         if qber < 0: qkd_fail_reason = f"QKD Sim Error ({qber})"; log_status = "QKD_SIM_ERR"
-        elif eve_det: qkd_fail_reason = f"High QBER ({qber_disp}) > Thresh ({qber_thresh:.3f}). Potential Eavesdropping."; log_status = "QKD_EVE_DETECTED"; qkd_fraud_reason = "QKD Alert: High QBER"
+        elif eve_det: qkd_fail_reason = f"High QBER ({qber_disp}) > Thresh ({qber_thresh:.3f}). Eavesdropping Likely."; log_status = "QKD_EVE_DETECTED"; qkd_fraud_reason = "QKD Alert: High QBER"
         elif not key_bin or key_len < min_key_len: qkd_fail_reason = f"Key too short ({key_len}b < {min_key_len}b)"; log_status = "QKD_KEY_INSUFFICIENT"
         if qkd_fail_reason: raise ValueError(f"QKD Failed: {qkd_fail_reason}")
         key_hash = hashlib.sha256(key_bin.encode('utf-8')).digest(); qkd_key = base64.urlsafe_b64encode(key_hash)
         logging.info(f"QKD OK (QBER:{qber_disp}). Key derived."); log_status = "QKD_SUCCESS"; last_outcome['qkd_status_msg'] = "Secure Channel OK"
-    except ValueError as qkd_e: # Catch specific QKD errors
+    except ValueError as qkd_e:
         flash(f"Transfer Aborted: {qkd_e}", "danger"); last_outcome.update({'status': 'Failed', 'reason': qkd_fail_reason or str(qkd_e), 'qkd_status_msg': log_status})
         log_failed_attempt(sender_id, receiver_id, amount, log_status, qber_value=qber if qber >=0 else None, fraud_reason=qkd_fraud_reason, exception_info=qkd_e)
         session['last_transfer_outcome'] = last_outcome; session.modified = True; return redirect(url_for('index'))
-    except Exception as qkd_e: # Catch unexpected QKD errors
+    except Exception as qkd_e:
         logging.error(f"Unexpected QKD Error: {qkd_e}", exc_info=True); log_status = "QKD_INTERNAL_ERR"
         flash('Transfer Aborted: Secure channel error.', 'danger'); last_outcome.update({'status': 'Failed', 'reason': 'QKD Error', 'qkd_status_msg': log_status})
         log_failed_attempt(sender_id, receiver_id, amount, log_status, exception_info=qkd_e)
@@ -1731,21 +1694,29 @@ def transfer_funds():
         if not qkd_key: raise ValueError("Internal error: QKD key missing.")
         log_status = "DB_TXN_STARTING"; conn = get_db_connection();
         if not conn: raise ConnectionError("DB service unavailable.")
-        db_type = getattr(conn, 'driver_name', 'Unknown') # Get driver name set in get_db_connection
 
-        if db_type == 'psycopg2':
+        # --- REVERTED CURSOR CREATION (Using isinstance) ---
+        cursor_created = False
+        db_type = "Unknown" # Initialize db_type
+
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
             cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDict for PG
+            db_type = "PostgreSQL" # Set type for logging
             logging.debug("Transfer Funds: Using psycopg2 RealDictCursor.")
-        elif db_type == 'mysql':
-            # Use dictionary=True for MySQL. Buffered=True might be needed if you read after writes without commit.
-            cursor = conn.cursor(dictionary=True, buffered=True)
+            cursor_created = True
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            cursor = conn.cursor(dictionary=True, buffered=True) # Buffered might be needed for MySQL
+            db_type = "MySQL" # Set type for logging
             logging.debug("Transfer Funds: Using mysql.connector dictionary cursor.")
-        else:
-            # If driver_name wasn't set or is unexpected, raise error
-            logging.error(f"Unsupported database driver type encountered in transfer: {db_type}")
-            raise ConnectionError(f"Unsupported DB type for transfer: {db_type}")
+            cursor_created = True
 
-        needs_rollback = True # Assume rollback needed unless commit succeeds
+        # If still no cursor could be created, raise the error
+        if not cursor_created:
+            logging.error(f"Unsupported database connection type encountered in transfer: {type(conn)}")
+            raise ConnectionError(f"Unsupported DB type for transfer: {type(conn)}")
+        # --- END REVERTED CURSOR CREATION ---
+
+        needs_rollback = True
 
         # Lock & Validate Sender
         log_status = "DB_VALIDATE_SENDER"; cursor.execute("SELECT customer_id, balance FROM accounts WHERE account_id = %s FOR UPDATE", (sender_id,))
@@ -1762,24 +1733,16 @@ def transfer_funds():
         rx_name = rx_info['customer_name']; last_outcome['receiver_name'] = rx_name
 
         # Fraud Detection
-        last_outcome['fraud_check'] = fraud_res
-        is_fraudulent_ml = fraud_res.get('is_fraudulent', False)
-        ml_fraud_reason = fraud_res.get('reason')
-        final_fraud_reason = qkd_fraud_reason # QKD reason takes precedence
-        if is_fraudulent_ml:
-             if not final_fraud_reason: final_fraud_reason = ml_fraud_reason
-             elif ml_fraud_reason and ml_fraud_reason != qkd_fraud_reason: final_fraud_reason += f"; {ml_fraud_reason}" # Combine reasons
-        final_is_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml # Flagged if QKD alert OR fraud detected
-
-        # --- CORRECTED IF/ELSE SYNTAX ---
-        if final_is_flagged:
-            logging.warning(f"ALERT: {final_fraud_reason}")
-        else:
-            logging.info("Fraud check passed and no QKD alert.")
-        # --- END CORRECTION ---
-
-        qkd_status_final = "SECURED_FLAGGED" if final_is_flagged else "SECURED"
-        last_outcome['qkd_status_msg'] = qkd_status_final.replace('_',' ')
+        log_status = "FRAUD_CHECK"; logging.info("Running fraud check...")
+        hist_ml = [] # Fetch history... (omitted)
+        current_txn_data = {'amount': amount, 'recipient_username': rx_name, 'timestamp': datetime.datetime.now()} # Ensure feature names match model
+        try: fraud_res = detect_fraud(current_txn_data, hist_ml, **{'blacklist': app.config['FRAUD_BLACKLIST']})
+        except Exception as fraud_err: logging.error(f"Fraud check failed: {fraud_err}"); fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check Error'}; flash("Warning: Fraud check error.", "warning")
+        last_outcome['fraud_check'] = fraud_res; is_fraudulent_ml = fraud_res.get('is_fraudulent', False); ml_reason = fraud_res.get('reason')
+        final_reason = qkd_fraud_reason or (ml_reason if is_fraudulent_ml else None)
+        final_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml
+        if final_flagged: logging.warning(f"ALERT: {final_reason}") else: logging.info("Checks passed.")
+        qkd_status = "SECURED_FLAGGED" if final_flagged else "SECURED"; last_outcome['qkd_status_msg'] = qkd_status.replace('_',' ')
 
         # Encrypt Confirmation
         log_status = "ENCRYPTING"; msg_enc = f"CONF;{sender_id}>{receiver_id};AMT:{amount:.2f};QBER:{qber_disp};F:{final_flagged};R:{final_reason or 'N/A'};T:{datetime.datetime.now().isoformat()}"
@@ -1802,15 +1765,12 @@ def transfer_funds():
 
         # Log Transaction
         log_status = "DB_LOGGING"; log_qber = qber if qber >= 0 else None; log_reason = final_reason[:255] if final_reason else None
-        log_ts = datetime.datetime.now(datetime.timezone.utc) # Use UTC timestamp
+        log_ts = datetime.datetime.now(datetime.timezone.utc)
         log_vals = (sender_id, receiver_id, str(amount), qkd_status, enc_b64, None, log_qber, final_flagged, log_reason, log_ts)
         log_id = None
         if db_type == 'psycopg2':
-            # Quote timestamp for PG if needed (standard practice)
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, "timestamp") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING log_id"""
-            cursor.execute(log_sql, log_vals); log_row = cursor.fetchone()
-            # Safely access returned ID from RealDictRow
-            log_id = log_row['log_id'] if log_row else None
+            cursor.execute(log_sql, log_vals); log_row = cursor.fetchone(); log_id = log_row['log_id'] if log_row else None # Use key access for RealDictRow
         else: # MySQL
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, timestamp) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
             cursor.execute(log_sql, log_vals); log_id = cursor.lastrowid
@@ -1839,7 +1799,6 @@ def transfer_funds():
         logging.error(f"TXN Error ({log_status}) {sender_id}->{receiver_id}: {error_message}", exc_info=True)
         last_outcome.update({'status': 'Failed', 'reason': error_message[:200], 'qkd_status_msg': log_status.replace('_',' ')})
         flash(f"Transfer Failed: {error_message}" if log_status == "VALIDATION_FAIL_DB" else "Transfer Failed (System Error).", "error")
-        # Ensure amount is valid before logging failure
         amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
         log_failed_attempt(sender_id, receiver_id, amount_for_log, log_status, qber_value=qber if qber>=0 else None, fraud_reason=f"Txn Error: {error_message[:100]}", exception_info=e)
     except Exception as e:
@@ -1848,36 +1807,14 @@ def transfer_funds():
         flash("Transfer Failed (Critical Error).", "danger"); last_outcome.update({'status': 'Failed', 'reason': 'Critical Error', 'qkd_status_msg': log_status})
         amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
         log_failed_attempt(sender_id, receiver_id, amount_for_log, log_status, qber_value=qber if qber>=0 else None, fraud_reason="Critical Error", exception_info=e)
-    finally: # Cleanup for the main transaction block
-        # Ensure connection and cursor are closed properly
-        if conn and not getattr(conn, 'closed', True): # Check connection exists and not closed
-            if needs_rollback: # Check if rollback is needed (commit didn't happen)
-                # --- CORRECTED INDENTATION ---
-                try:
-                    conn.rollback()
-                    logging.warning(f"Transfer transaction rolled back (Final Status before rollback: {log_status}).")
-                # Catch specific DB error if possible, otherwise generic
-                except DB_ERROR_TYPE as rb_err:
-                    logging.error(f"Rollback failed during transfer error handling: {rb_err}")
-                except Exception as rb_gen_err: # Catch any other rollback error
-                     logging.error(f"Unexpected error during transfer rollback: {rb_gen_err}")
-                # --- END CORRECTION ---
-
-            # Close cursor if it exists and is not already closed
-            if cursor and not getattr(cursor, 'closed', True):
-                 try:
-                     cursor.close()
-                 except DB_ERROR_TYPE: # Ignore DB-specific errors closing cursor
-                     pass
-                 except Exception as cur_close_err:
-                     logging.error(f"Unexpected error closing transfer cursor: {cur_close_err}")
-
-            # Always attempt to close the connection obtained in this try block
+    finally: # Cleanup
+        if conn and not getattr(conn, 'closed', True):
+            if needs_rollback: try: conn.rollback(); logging.warning(f"TXN rolled back (Status: {log_status}).") except Exception as rb_err: logging.error(f"Rollback failed: {rb_err}")
+            if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except Exception as c_err: logging.error(f"Cursor close error: {c_err}")
             close_db_connection(conn)
 
     session['last_transfer_outcome'] = last_outcome; session.modified = True
-    # Ensure parentheses are balanced in the final redirect
-    return redirect(url_for('index'))
+    return redirect(url_for('index')) # Final redirect
 
 
 # === HISTORY ROUTE ===
