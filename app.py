@@ -1759,12 +1759,21 @@ def transfer_funds():
         if not qkd_key: raise ValueError("Internal error: QKD key missing.")
         log_status = "DB_TXN_STARTING"; conn = get_db_connection();
         if not conn: raise ConnectionError("DB service unavailable.")
-        db_type = getattr(conn, 'driver_name', 'Unknown')
-        # Use RealDictCursor for PG for dict-like access
-        if db_type == 'psycopg2': cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        elif db_type == 'mysql': cursor = conn.cursor(dictionary=True, buffered=True) # Buffered may be needed for MySQL
-        else: raise ConnectionError("Unsupported DB type for transfer.")
-        needs_rollback = True
+        db_type = getattr(conn, 'driver_name', 'Unknown') # Get driver name set in get_db_connection
+
+        if db_type == 'psycopg2':
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDict for PG
+            logging.debug("Transfer Funds: Using psycopg2 RealDictCursor.")
+        elif db_type == 'mysql':
+            # Use dictionary=True for MySQL. Buffered=True might be needed if you read after writes without commit.
+            cursor = conn.cursor(dictionary=True, buffered=True)
+            logging.debug("Transfer Funds: Using mysql.connector dictionary cursor.")
+        else:
+            # If driver_name wasn't set or is unexpected, raise error
+            logging.error(f"Unsupported database driver type encountered in transfer: {db_type}")
+            raise ConnectionError(f"Unsupported DB type for transfer: {db_type}")
+
+        needs_rollback = True # Assume rollback needed unless commit succeeds
 
         # Lock & Validate Sender
         log_status = "DB_VALIDATE_SENDER"; cursor.execute("SELECT customer_id, balance FROM accounts WHERE account_id = %s FOR UPDATE", (sender_id,))
