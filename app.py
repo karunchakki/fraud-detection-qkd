@@ -1892,7 +1892,7 @@ def transfer_funds():
             close_db_connection(conn)
 
     session['last_transfer_outcome'] = last_outcome; session.modified = True
-    return redirect(url_for('index')
+    return redirect(url_for('index'))
 
 
 # === HISTORY ROUTE ===
