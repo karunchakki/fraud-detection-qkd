@@ -1809,12 +1809,33 @@ def transfer_funds():
         flash("Transfer Failed (Critical Error).", "danger"); last_outcome.update({'status': 'Failed', 'reason': 'Critical Error', 'qkd_status_msg': log_status})
         amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
         log_failed_attempt(sender_id, receiver_id, amount_for_log, log_status, qber_value=qber if qber>=0 else None, fraud_reason="Critical Error", exception_info=e)
-    finally: # Cleanup
-        if conn and not getattr(conn, 'closed', True):
-            if needs_rollback: try: conn.rollback(); logging.warning(f"TXN rolled back (Status: {log_status}).") except Exception as rb_err: logging.error(f"Rollback failed: {rb_err}")
-            if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except Exception as c_err: logging.error(f"Cursor close error: {c_err}")
-            close_db_connection(conn)
+    finally: # Cleanup for the main transaction block
+        # Ensure connection and cursor are closed properly
+        if conn and not getattr(conn, 'closed', True): # Check connection exists and not closed
+            if needs_rollback: # Check if rollback is needed (commit didn't happen)
+                # --- CORRECTED INDENTATION ---
+                try:
+                    conn.rollback()
+                    logging.warning(f"Transfer transaction rolled back (Final Status before rollback: {log_status}).")
+                # Catch specific DB error if possible, otherwise generic
+                except DB_ERROR_TYPE as rb_err: # Use DB_ERROR_TYPE defined globally
+                    logging.error(f"Rollback failed during transfer error handling: {rb_err}")
+                except Exception as rb_gen_err: # Catch any other rollback error
+                     logging.error(f"Unexpected error during transfer rollback: {rb_gen_err}")
+                # --- END CORRECTION ---
 
+            # Close cursor if it exists and is not already closed
+            if cursor and not getattr(cursor, 'closed', True):
+                 try:
+                     cursor.close()
+                 except DB_ERROR_TYPE: # Ignore DB-specific errors closing cursor
+                     pass
+                 except Exception as cur_close_err:
+                     logging.error(f"Unexpected error closing transfer cursor: {cur_close_err}")
+
+            # Always attempt to close the connection obtained in this try block
+            close_db_connection(conn)
+          
     session['last_transfer_outcome'] = last_outcome; session.modified = True
     return redirect(url_for('index')) # Final redirect
 
