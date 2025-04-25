@@ -471,59 +471,31 @@ else:
 
 # --- Database Helper Functions (Adapted for PostgreSQL/MySQL) ---
 def get_db_connection():
-    """
-    Establishes and returns a database connection based on environment.
-    Prioritizes PostgreSQL using DATABASE_URL (for Render).
-    Falls back to MySQL using MYSQL_CONFIG (for local testing).
-    Returns the connection object or None on failure.
-    """
-    conn = None
-    db_url = os.environ.get('DATABASE_URL') # Render injects this automatically
-
-    # --- Primary Path: Use DATABASE_URL for PostgreSQL ---
-    if db_url:
-        if not POSTGRES_AVAILABLE:
-            logging.critical("FATAL: DATABASE_URL set, but psycopg2 driver unavailable!")
-            return None
+    """Establishes DB connection (PG priority, MySQL fallback). Returns conn or None."""
+    conn = None; db_url = os.environ.get('DATABASE_URL')
+    if db_url: # --- PostgreSQL Path ---
+        if not POSTGRES_AVAILABLE: logging.critical("FATAL: DATABASE_URL set, but psycopg2 unavailable!"); return None
         try:
             logging.debug("Attempting PostgreSQL connection via DATABASE_URL.")
-            conn = psycopg2.connect(db_url, connect_timeout=10) # Add timeout
-            # Add 'driver_name' attribute for easier type checking later
-            # Note: psycopg2 connection objects don't have a standard simple 'driver_name'
-            # We might need to rely on isinstance checks later if needed,
-            # or wrap the connection in a custom class if we want this attribute.
-            # For now, just know it's likely PG if db_url was used.
-            logging.info("PostgreSQL connection successful via DATABASE_URL.")
+            conn = psycopg2.connect(db_url, connect_timeout=10)
+            conn.driver_name = 'psycopg2' # <--- SET ATTRIBUTE HERE
+            logging.info("PostgreSQL connection successful.")
             return conn
-        except psycopg2.Error as e_pg:
-            logging.critical(f"CRITICAL PG Conn Error: {e_pg}")
-            return None
-        except Exception as e_pg_other:
-            logging.critical(f"CRITICAL Unexpected PG Conn Error: {e_pg_other}", exc_info=True)
-            return None
+        except psycopg2.Error as e: logging.critical(f"CRITICAL PG Conn Error: {e}"); return None
+        except Exception as e: logging.critical(f"CRITICAL Unexpected PG Conn Error: {e}", exc_info=True); return None
     else: # --- MySQL Fallback Path ---
         logging.debug("DATABASE_URL not set. Attempting MySQL fallback.")
-        if not MYSQL_AVAILABLE:
-            logging.critical("FATAL: MySQL Connector unavailable for fallback!");
-            return None
+        if not MYSQL_AVAILABLE: logging.critical("FATAL: MySQL Connector unavailable!"); return None
         try:
             logging.debug(f"Attempting MySQL connection: Host={MYSQL_CONFIG.get('host')}")
             conn = mysql.connector.connect(**MYSQL_CONFIG)
             if conn.is_connected():
-                 # Add 'driver_name' attribute for consistency if desired
-                 conn.driver_name = 'mysql'
-                 logging.info("MySQL fallback connection successful.")
+                 conn.driver_name = 'mysql' # <--- SET ATTRIBUTE HERE
+                 logging.info("MySQL fallback connection successful.");
                  return conn
-            else:
-                 logging.error("MySQL fallback failed: is_connected() is False.")
-                 if conn: conn.close() # Close potentially broken connection
-                 return None
-        except MySQLError as e_mysql:
-            logging.critical(f"CRITICAL MySQL Fallback Conn Error: {e_mysql}")
-            return None
-        except Exception as e_mysql_other:
-             logging.critical(f"CRITICAL Unexpected MySQL Fallback Conn Error: {e_mysql_other}", exc_info=True)
-             return None
+            else: logging.error("MySQL fallback failed: is_connected() is False."); conn.close(); return None
+        except MySQLError as e: logging.critical(f"CRITICAL MySQL Fallback Conn Error: {e}"); return None
+        except Exception as e: logging.critical(f"CRITICAL Unexpected MySQL Fallback Conn Error: {e}", exc_info=True); return None
 
 def close_db_connection(conn):
     """Safely closes the database connection (PG or MySQL)."""
