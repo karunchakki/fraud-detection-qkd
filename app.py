@@ -1740,7 +1740,10 @@ def transfer_funds():
         last_outcome['fraud_check'] = fraud_res; is_fraudulent_ml = fraud_res.get('is_fraudulent', False); ml_reason = fraud_res.get('reason')
         final_reason = qkd_fraud_reason or (ml_reason if is_fraudulent_ml else None)
         final_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml
-        if final_flagged: logging.warning(f"ALERT: {final_reason}") else: logging.info("Checks passed.")
+        if final_is_flagged: # Use the correct variable name if you changed it
+          logging.warning(f"ALERT: {final_fraud_reason}") # Use the correct variable name
+        else:
+          logging.info("Fraud check passed and no QKD alert.")
         qkd_status = "SECURED_FLAGGED" if final_flagged else "SECURED"; last_outcome['qkd_status_msg'] = qkd_status.replace('_',' ')
 
         # Encrypt Confirmation
