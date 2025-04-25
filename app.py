@@ -1574,7 +1574,7 @@ from cryptography.fernet import Fernet, InvalidToken # Ensure Fernet/InvalidToke
 from decimal import Decimal, InvalidOperation # Ensure Decimal/InvalidOperation are imported
 # Assume other necessary imports like Flask, request, session, g, etc., are already present
 
-@app.route('/transfer-funds', methods=['POST']) # Corrected route name
+@app.route('/transfer-funds', methods=['POST']) # Use the corrected route name if needed
 @login_required
 def transfer_funds():
     """Handles the fund transfer process including QKD and Fraud Check."""
@@ -1597,7 +1597,7 @@ def transfer_funds():
         user_accounts = get_accounts_data(customer_id_filter=logged_in_user_id)
         if user_accounts is None: raise ConnectionError("DB error fetching sender account.")
         if not user_accounts: raise ValueError("Sender account details not found.")
-        sender_account = user_accounts[0]
+        sender_account = user_accounts[0] # Assuming the first account is the sender's primary
         sender_id = sender_account.get('account_id')
         if sender_id is None: raise ValueError("Sender account ID missing.")
         last_outcome['sender_id'] = sender_id
@@ -1610,26 +1610,32 @@ def transfer_funds():
             # Dynamically populate choices BEFORE validation
             all_accounts = get_accounts_data()
             if all_accounts is None: raise ConnectionError("Recipient list fetch error during validation setup.")
-            # Use INT keys for choices because form field coerces to int
-            recipients = [(acc['account_id'], f"{acc.get('customer_name','Unknown')} (ID:{acc['account_id']})")
+            # Use STRINGS for choice keys/values as HTML form values are strings
+            recipients = [(str(acc['account_id']), f"{acc.get('customer_name','Unknown')} (ID:{acc['account_id']})")
                           for acc in all_accounts if acc.get('customer_id') != logged_in_user_id and acc.get('account_id')]
             transfer_form.receiver_account_id.choices = [('', '-- Select Recipient --')] + recipients # Set choices on the instance
 
             if transfer_form.validate_on_submit(): # Validate the submitted data
                 logging.debug("WTForms validation successful.")
-                # Data should already be coerced to the correct types by the form fields
-                receiver_id = transfer_form.receiver_account_id.data # Already int due to coerce=int
-                amount = transfer_form.amount.data # Already Decimal
-                simulate_eve_checked = transfer_form.simulate_eve.data # Already bool
+                # Get the raw data (likely string for SelectField unless coerced earlier)
+                receiver_id_str_or_int = transfer_form.receiver_account_id.data # Let's check its type
+                amount = transfer_form.amount.data # Should be Decimal
+                simulate_eve_checked = transfer_form.simulate_eve.data # Should be bool
 
-                # Add safety checks AFTER validation
-                if receiver_id is None:
-                     logging.error("WTForms validation passed, but receiver_id is None.")
-                     raise ValueError("Invalid recipient selection. Please choose an account.")
-                elif not isinstance(receiver_id, int):
-                     # This case indicates a potential issue with coerce=int or form setup
-                     logging.error(f"WTForms validation passed, but receiver_id is not int: {receiver_id} (Type: {type(receiver_id)})")
-                     raise ValueError("Invalid recipient data type received.")
+                # --- EXPLICIT CONVERSION & TYPE CHECK AFTER VALIDATION ---
+                if not receiver_id_str_or_int: # Check if it's empty (e.g., placeholder submitted)
+                     logging.error("WTForms validation passed, but receiver_id data is empty.")
+                     raise ValueError("Please select a valid recipient.")
+
+                try:
+                    # Attempt to convert the validated ID data to an integer
+                    receiver_id = int(receiver_id_str_or_int)
+                    logging.debug(f"Successfully converted/validated receiver_id '{receiver_id_str_or_int}' to int: {receiver_id}")
+                except (ValueError, TypeError):
+                     # This might happen if data isn't a string or int convertible string
+                     logging.error(f"Failed to convert validated receiver_id data '{receiver_id_str_or_int}' (type: {type(receiver_id_str_or_int)}) to int.")
+                     raise ValueError("Invalid recipient ID data received.")
+                # --- END EXPLICIT CONVERSION ---
 
             else: # WTForms validation failed
                  # Nicely format WTForms errors for flashing
@@ -1649,8 +1655,10 @@ def transfer_funds():
             except InvalidOperation: raise ValueError("Invalid amount format (e.g., 100.50).")
 
         # --- Common Validations (Post-Parsing/Validation) ---
+        # Now check if receiver_id is successfully an integer
         if not isinstance(receiver_id, int):
-             raise ValueError("Internal Error: Recipient ID is invalid or missing after processing.")
+            # This means either manual parsing failed or WTForms path failed conversion/check
+            raise ValueError("Internal Error: Recipient ID is invalid or missing after processing.")
         if sender_id == receiver_id:
             raise ValueError("Cannot transfer funds to your own account.")
         if amount is None or not isinstance(amount, Decimal) or amount <= 0:
