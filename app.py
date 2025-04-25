@@ -1632,7 +1632,6 @@ def transfer_funds():
         try:
             ip_address = None
             if 'RENDER' in os.environ: # Check if on Render
-                # Generate simulated IP
                 octet1 = random.choice([10, 172, 192, random.randint(1, 223)]); octet3 = random.randint(0, 254); octet4 = random.randint(1, 254)
                 if octet1 == 172: octet2 = random.randint(16, 31)
                 elif octet1 == 192: octet2 = 168
@@ -1694,7 +1693,7 @@ def transfer_funds():
         log_status = "DB_TXN_STARTING"; conn = get_db_connection();
         if not conn: raise ConnectionError("DB service unavailable.")
 
-        # --- REVERTED CURSOR CREATION (Using isinstance) ---
+        # --- CORRECTED CURSOR CREATION (Using isinstance) ---
         cursor_created = False
         db_type = "Unknown" # Initialize db_type
 
@@ -1709,11 +1708,10 @@ def transfer_funds():
             logging.debug("Transfer Funds: Using mysql.connector dictionary cursor.")
             cursor_created = True
 
-        # If still no cursor could be created, raise the error
-        if not cursor_created:
+        if not cursor_created: # If still no cursor could be created, raise the error
             logging.error(f"Unsupported database connection type encountered in transfer: {type(conn)}")
             raise ConnectionError(f"Unsupported DB type for transfer: {type(conn)}")
-        # --- END REVERTED CURSOR CREATION ---
+        # --- END CORRECTED CURSOR CREATION ---
 
         needs_rollback = True
 
@@ -1733,18 +1731,24 @@ def transfer_funds():
 
         # Fraud Detection
         log_status = "FRAUD_CHECK"; logging.info("Running fraud check...")
-        hist_ml = [] # Fetch history... (omitted)
+        hist_ml = [] # Fetch history... (code omitted)
         current_txn_data = {'amount': amount, 'recipient_username': rx_name, 'timestamp': datetime.datetime.now()} # Ensure feature names match model
         try: fraud_res = detect_fraud(current_txn_data, hist_ml, **{'blacklist': app.config['FRAUD_BLACKLIST']})
         except Exception as fraud_err: logging.error(f"Fraud check failed: {fraud_err}"); fraud_res = {'is_fraudulent': False, 'reason': 'Fraud Check Error'}; flash("Warning: Fraud check error.", "warning")
         last_outcome['fraud_check'] = fraud_res; is_fraudulent_ml = fraud_res.get('is_fraudulent', False); ml_reason = fraud_res.get('reason')
         final_reason = qkd_fraud_reason or (ml_reason if is_fraudulent_ml else None)
-        final_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml
-        if final_is_flagged: # Use the correct variable name if you changed it
-          logging.warning(f"ALERT: {final_fraud_reason}") # Use the correct variable name
+        final_flagged = bool(qkd_fraud_reason) or is_fraudulent_ml # Use this consistent variable name
+
+        # --- CORRECTED IF/ELSE SYNTAX and variable name ---
+        if final_flagged:
+            # Use final_fraud_reason here
+            logging.warning(f"ALERT: {final_reason or 'Flagged - Reason Unknown'}")
         else:
-          logging.info("Fraud check passed and no QKD alert.")
-        qkd_status = "SECURED_FLAGGED" if final_flagged else "SECURED"; last_outcome['qkd_status_msg'] = qkd_status.replace('_',' ')
+            logging.info("Fraud check passed and no QKD alert.")
+        # --- END CORRECTION ---
+
+        qkd_status = "SECURED_FLAGGED" if final_flagged else "SECURED"; # Use final_flagged
+        last_outcome['qkd_status_msg'] = qkd_status.replace('_',' ')
 
         # Encrypt Confirmation
         log_status = "ENCRYPTING"; msg_enc = f"CONF;{sender_id}>{receiver_id};AMT:{amount:.2f};QBER:{qber_disp};F:{final_flagged};R:{final_reason or 'N/A'};T:{datetime.datetime.now().isoformat()}"
@@ -1768,11 +1772,11 @@ def transfer_funds():
         # Log Transaction
         log_status = "DB_LOGGING"; log_qber = qber if qber >= 0 else None; log_reason = final_reason[:255] if final_reason else None
         log_ts = datetime.datetime.now(datetime.timezone.utc)
-        log_vals = (sender_id, receiver_id, str(amount), qkd_status, enc_b64, None, log_qber, final_flagged, log_reason, log_ts)
+        log_vals = (sender_id, receiver_id, str(amount), qkd_status, enc_b64, None, log_qber, final_flagged, log_reason, log_ts) # Use final_flagged here
         log_id = None
         if db_type == 'psycopg2':
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, "timestamp") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING log_id"""
-            cursor.execute(log_sql, log_vals); log_row = cursor.fetchone(); log_id = log_row['log_id'] if log_row else None # Use key access for RealDictRow
+            cursor.execute(log_sql, log_vals); log_row = cursor.fetchone(); log_id = log_row['log_id'] if log_row else None
         else: # MySQL
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, timestamp) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
             cursor.execute(log_sql, log_vals); log_id = cursor.lastrowid
@@ -1813,7 +1817,7 @@ def transfer_funds():
         # Ensure connection and cursor are closed properly
         if conn and not getattr(conn, 'closed', True): # Check connection exists and not closed
             if needs_rollback: # Check if rollback is needed (commit didn't happen)
-                # --- CORRECTED INDENTATION ---
+                # --- CORRECTED INDENTATION and Exception Catching ---
                 try:
                     conn.rollback()
                     logging.warning(f"Transfer transaction rolled back (Final Status before rollback: {log_status}).")
@@ -1835,9 +1839,10 @@ def transfer_funds():
 
             # Always attempt to close the connection obtained in this try block
             close_db_connection(conn)
-          
+
     session['last_transfer_outcome'] = last_outcome; session.modified = True
-    return redirect(url_for('index')) # Final redirect
+    # Ensure parentheses are balanced in the final redirect
+    return redirect(url_for('index'))
 
 
 # === HISTORY ROUTE ===
