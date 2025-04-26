@@ -178,33 +178,32 @@ except ModuleNotFoundError as e:
     exit(1)
 
 # --- Define Global Timezone ---
-# Default to UTC *using datetime library* if pytz unavailable
-LOCAL_TIMEZONE = timezone.utc # Use datetime.timezone.utc as the safe default
+# Define your target local timezone
+PYTZ_AVAILABLE = False # Initialize flag
+pytz = None # Initialize pytz object placeholder
+LOCAL_TIMEZONE = timezone.utc # Default to built-in UTC
 
-if PYTZ_AVAILABLE and pytz: # Check both flag and that pytz object exists
+try:
+    import pytz # Attempt import
+    PYTZ_AVAILABLE = True
+    logging.info("--- pytz library found. Timezone conversion enabled. ---")
     try:
+        # Use environment variable if set, otherwise default (only if pytz loaded)
         LOCAL_TIMEZONE_STR = os.environ.get('LOCAL_TIMEZONE', 'Asia/Kolkata')
-        LOCAL_TIMEZONE = pytz.timezone(LOCAL_TIMEZONE_STR) # Use pytz timezone if available
+        LOCAL_TIMEZONE = pytz.timezone(LOCAL_TIMEZONE_STR) # Use pytz timezone object
         logging.info(f"--- Using local timezone for display: {LOCAL_TIMEZONE_STR} ---")
     except pytz.UnknownTimeZoneError:
         logging.error(f"--- Invalid LOCAL_TIMEZONE '{LOCAL_TIMEZONE_STR}', defaulting to UTC. ---")
-        LOCAL_TIMEZONE = pytz.utc # Fallback to pytz UTC
+        LOCAL_TIMEZONE = pytz.utc # Fallback to pytz UTC if name invalid
     except Exception as tz_err:
          logging.error(f"--- Error setting pytz timezone, defaulting to UTC: {tz_err} ---")
-         LOCAL_TIMEZONE = pytz.utc # Fallback to pytz UTC
-else:
-     logging.warning(f"--- pytz not available (available={PYTZ_AVAILABLE}), timestamps will use basic UTC. ---")
-     # LOCAL_TIMEZONE remains datetime.timezone.utc
-
-# Define your target local timezone
-try:
-    import pytz
-    PYTZ_AVAILABLE = True
-    logging.info("--- pytz library found. Timezone conversion enabled. ---")
+         LOCAL_TIMEZONE = pytz.utc # Fallback to pytz UTC on other errors
 except ImportError:
-    PYTZ_AVAILABLE = False
-    pytz = None # Define as None if not available
-    logging.warning("--- pytz library not found. Timezone conversion disabled. `pip install pytz` ---")
+    logging.warning("--- pytz library not found. Timestamps will use basic UTC. `pip install pytz` ---")
+    # PYTZ_AVAILABLE remains False
+    # LOCAL_TIMEZONE remains datetime.timezone.utc
+except Exception as import_err:
+     logging.error(f"--- Unexpected error importing pytz: {import_err}. Timestamps will use basic UTC. ---")
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
