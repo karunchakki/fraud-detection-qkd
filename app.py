@@ -1770,71 +1770,60 @@ def transfer_funds():
         logging.info("Balances updated.")
 
         # Log Transaction
-        log_status = "DB_LOGGING"
-        log_qber = qber if qber >= 0 else None
-        log_reason = final_reason[:255] if final_reason else None # Ensure final_reason is defined above
-        log_ts = datetime.datetime.now(datetime.timezone.utc) # Use timezone-aware timestamp
-        # Ensure final_flagged is defined above
+        log_status = "DB_LOGGING"; log_qber = qber if qber >= 0 else None; log_reason = final_reason[:255] if final_reason else None
+        log_ts = datetime.datetime.now(datetime.timezone.utc)
         log_vals = (sender_id, receiver_id, str(amount), qkd_status, enc_b64, None, log_qber, final_flagged, log_reason, log_ts)
         log_id = None # Initialize log_id
 
         # --- CORRECTED LOGIC FOR PG/MYSQL ID RETRIEVAL ---
-        if db_type == 'psycopg2':
+        # Use db_type which was determined during cursor creation
+        # Perform case-insensitive comparison for safety
+        if db_type.lower() == 'postgresql': # Use .lower() and full name
             # Quote "timestamp" if it's a reserved word in your PG version/schema
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, "timestamp") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING log_id"""
             try:
                 cursor.execute(log_sql, log_vals)
-                log_row = cursor.fetchone() # Fetch the row returned by RETURNING
-                # Check if a row was returned AND it contains the 'log_id' key
+                log_row = cursor.fetchone()
                 if log_row and 'log_id' in log_row:
                     log_id = log_row['log_id']
                     logging.info(f"PostgreSQL RETURNING successful: log_id={log_id}")
                 else:
-                    # Log specific error if RETURNING didn't work
                     logging.error(f"PostgreSQL RETURNING clause failed. fetchone() result: {log_row}")
-                    # Raise an error immediately, do not proceed to MySQL logic
                     raise DB_ERROR_TYPE("Failed to retrieve log ID via RETURNING.")
-            except DB_ERROR_TYPE as pg_log_err: # Catch specific PG errors during insert/fetch
+            except DB_ERROR_TYPE as pg_log_err:
                 logging.error(f"Error during PostgreSQL log insert/RETURNING: {pg_log_err}")
-                raise # Re-raise the original DB error to be caught by the outer handler
-            except Exception as e_pg_log: # Catch other unexpected errors
+                raise
+            except Exception as e_pg_log:
                 logging.error(f"Unexpected error during PostgreSQL log insert: {e_pg_log}", exc_info=True)
-                # Wrap in generic DB_ERROR_TYPE for outer handler
                 raise DB_ERROR_TYPE(f"Unexpected error during PG log insert: {e_pg_log}")
 
-        elif db_type == 'mysql': # Only execute this block if connected to MySQL
+        elif db_type.lower() == 'mysql': # Use .lower() and full name
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, timestamp) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
             try:
                 cursor.execute(log_sql, log_vals);
-                log_id = cursor.lastrowid # Try standard lastrowid first
-                if not log_id: # If lastrowid is 0 or None, try the SELECT fallback
-                     logging.warning("MySQL lastrowid failed for log insert, attempting fallback SELECT LAST_INSERT_ID().")
+                log_id = cursor.lastrowid
+                if not log_id:
+                     logging.warning("MySQL lastrowid failed, attempting fallback SELECT LAST_INSERT_ID().")
                      try:
-                         # Ensure cursor is suitable for another query if needed (buffered=True helps)
                          cursor.execute("SELECT LAST_INSERT_ID()")
-                         fallback_id_row = cursor.fetchone() # Should return a tuple like (id,)
-                         # Safely get the first element if the tuple is valid
+                         fallback_id_row = cursor.fetchone()
                          log_id = fallback_id_row[0] if fallback_id_row and len(fallback_id_row) > 0 else None
-                     except Exception as e_lid: # Catch errors during fallback query
+                     except Exception as e_lid:
                          logging.error(f"MySQL LAST_INSERT_ID() fallback failed: {e_lid}")
-                         # Raise specific error if fallback also fails
                          raise DB_ERROR_TYPE("Failed get log ID using lastrowid and fallback SELECT.")
                 logging.info(f"MySQL log insert successful: log_id={log_id}")
-            except DB_ERROR_TYPE as mysql_log_err: # Catch specific MySQL errors
+            except DB_ERROR_TYPE as mysql_log_err:
                  logging.error(f"Error during MySQL log insert/lastrowid: {mysql_log_err}")
-                 raise # Re-raise original error
-            except Exception as e_mysql_log: # Catch other unexpected errors
+                 raise
+            except Exception as e_mysql_log:
                 logging.error(f"Unexpected error during MySQL log insert: {e_mysql_log}", exc_info=True)
                 raise DB_ERROR_TYPE(f"Unexpected error during MySQL log insert: {e_mysql_log}")
 
-        else: # This case means db_type was neither 'psycopg2' nor 'mysql'
-            # This should ideally not be reached if cursor creation succeeded
+        else: # This case means db_type was not 'PostgreSQL' or 'MySQL'
             raise ConnectionError(f"Cannot log transaction: Unsupported DB type '{db_type}' identified.")
 
-        # --- Final Check for log_id ---
-        # This check ensures that one of the branches above *must* have successfully assigned an ID
+        # Final Check for log_id
         if log_id is None:
-             # If log_id is still None here, something unexpected happened in both PG and MySQL paths
              logging.error("Log ID is still None after attempting DB-specific retrieval methods.")
              raise DB_ERROR_TYPE("Failed to obtain log ID after insert.")
         # --- END Final Check ---
