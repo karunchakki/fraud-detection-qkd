@@ -2368,8 +2368,23 @@ def get_log_entry_details(log_id):
     except (DB_ERROR_TYPE, ConnectionError) as e: logging.error(f"DB/Conn error log details ({db_type}) {log_id}: {e}"); details = None
     except Exception as e: logging.error(f"Unexpected log details error {log_id}: {e}", exc_info=True); details = None
     finally:
-        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
-        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
+        # --- CORRECTED FINALLY BLOCK ---
+        if cursor and not getattr(cursor, 'closed', True): # Check cursor exists and not closed
+            # --- CORRECTED INDENTATION ---
+            try:
+                cursor.close()
+            except DB_ERROR_TYPE as cur_close_err: # Use global DB_ERROR_TYPE
+                 # Log DB-specific close errors if needed, otherwise pass
+                 # logging.warning(f"DBError closing get_details cursor: {cur_close_err}")
+                 pass
+            except Exception as cur_close_err: # Catch other potential close errors
+                logging.warning(f"Non-DB error closing get_details cursor: {cur_close_err}")
+            # --- END CORRECTION ---
+
+        # Always close the connection if it was obtained and not closed
+        if conn and not getattr(conn, 'closed', True): # Check if conn was successfully assigned and not closed
+            close_db_connection(conn)
+          
     logging.info(f"--- Finished fetching log details {log_id}. Found: {bool(details)} ---")
     return details
 
