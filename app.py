@@ -1489,6 +1489,7 @@ def transfer_funds():
 
     # --- 1. Input Validation & Form Handling ---
     try:
+        # Get Sender Account first
         user_accounts = get_accounts_data(customer_id_filter=logged_in_user_id)
         if user_accounts is None: raise ConnectionError("DB error fetching sender account.")
         if not user_accounts: raise ValueError("Sender account details not found.")
@@ -1497,26 +1498,38 @@ def transfer_funds():
         if sender_id is None: raise ValueError("Sender account ID missing.")
         last_outcome['sender_id'] = sender_id
 
+        # Handle Form Submission Data
         if WTFORMS_AVAILABLE:
             logging.debug("WTForms available, processing form.")
-            transfer_form = TransferForm(request.form)
+            transfer_form = TransferForm(request.form) # Instantiate with POST data
+
+            # Dynamically populate choices BEFORE validation
             all_accounts = get_accounts_data()
             if all_accounts is None: raise ConnectionError("Recipient list fetch error.")
-            # Use STRINGS for choice values
+            # Use STRINGS for choice values to match HTML form submission
             recipients = [(str(acc['account_id']), f"{acc.get('customer_name','Unknown')} (ID:{acc['account_id']})")
                           for acc in all_accounts if acc.get('customer_id') != logged_in_user_id and acc.get('account_id')]
-            transfer_form.receiver_account_id.choices = [('', '-- Select Recipient --')] + recipients
+            transfer_form.receiver_account_id.choices = [('', '-- Select Recipient --')] + recipients # Set choices on the instance
 
-            if transfer_form.validate_on_submit():
+            if transfer_form.validate_on_submit(): # Validate the submitted data
                 logging.debug("WTForms validation successful.")
-                receiver_id_str_or_int = transfer_form.receiver_account_id.data
-                amount = transfer_form.amount.data
-                simulate_eve_checked = transfer_form.simulate_eve.data
+                # Get the raw data (SelectField data is usually string)
+                receiver_id_str = transfer_form.receiver_account_id.data
+                amount = transfer_form.amount.data # Should be Decimal
+                simulate_eve_checked = transfer_form.simulate_eve.data # Should be bool
 
-                if not receiver_id_str_or_int: raise ValueError("Please select a valid recipient.")
+                # --- EXPLICIT CONVERSION AFTER VALIDATION ---
+                if not receiver_id_str: # Check if it's empty (placeholder selected)
+                     logging.error("WTForms validation passed, but receiver_id data is empty.")
+                     raise ValueError("Please select a valid recipient.")
                 try:
-                    receiver_id = int(receiver_id_str_or_int) # Explicit conversion
-                except (ValueError, TypeError): raise ValueError("Invalid recipient ID data received.")
+                    # Attempt to convert the validated string ID to an integer
+                    receiver_id = int(receiver_id_str)
+                    logging.debug(f"Successfully converted receiver_id_str '{receiver_id_str}' to int: {receiver_id}")
+                except (ValueError, TypeError):
+                     logging.error(f"Failed to convert validated receiver_id data '{receiver_id_str}' to int.")
+                     raise ValueError("Invalid recipient ID data received.")
+                # --- END EXPLICIT CONVERSION ---
 
             else: # WTForms validation failed
                  error_msg = "; ".join([f"{field.replace('_',' ').title()}: {', '.join(errs)}"
@@ -1524,7 +1537,7 @@ def transfer_funds():
                  logging.warning(f"WTForms validation failed: {transfer_form.errors}")
                  raise ValueError(f"Invalid input: {error_msg}")
 
-        else: # Manual parsing
+        else: # Manual parsing if WTForms unavailable
             logging.debug("WTForms not available, using manual parsing.")
             receiver_id_str = request.form.get('receiver_account_id'); amount_str = request.form.get('amount'); simulate_eve_checked = 'simulate_eve' in request.form
             if not receiver_id_str: raise ValueError("Please select a recipient account.")
@@ -1534,23 +1547,30 @@ def transfer_funds():
             try: amount = Decimal(amount_str.strip())
             except InvalidOperation: raise ValueError("Invalid amount format (e.g., 100.50).")
 
-        # --- Common Validations ---
-        if not isinstance(receiver_id, int): raise ValueError("Internal Error: Recipient ID invalid.")
-        if sender_id == receiver_id: raise ValueError("Cannot transfer funds to self.")
-        if amount <= 0: raise ValueError("Amount must be positive.")
+        # --- Common Validations (Post-Parsing/Validation) ---
+        if not isinstance(receiver_id, int): # Check if conversion above was successful
+            raise ValueError("Internal Error: Recipient ID is invalid or missing after processing.")
+        if sender_id == receiver_id:
+            raise ValueError("Cannot transfer funds to your own account.")
+        if amount is None or not isinstance(amount, Decimal) or amount <= 0:
+            raise ValueError("Amount must be a positive value (e.g., greater than 0.00).")
 
+        # --- Input Validated Successfully ---
         last_outcome.update({'amount': f"{amount:.2f}", 'receiver_id': receiver_id, 'simulate_eve': simulate_eve_checked})
-        log_status = "INPUT_VALIDATED"; logging.info(f"Transfer Validated: ₹{amount:.2f} from {sender_id} to {receiver_id} (SimEve: {simulate_eve_checked})")
+        log_status = "INPUT_VALIDATED"
+        logging.info(f"Transfer Validated: ₹{amount:.2f} from {sender_id} to {receiver_id} (SimEve: {simulate_eve_checked})")
 
     except (ValueError, ConnectionError, TypeError, InvalidOperation, KeyError) as e:
         flash(f"Transfer Failed: {e}", "error"); last_outcome.update({'status': 'Failed', 'reason': f"Input Error: {str(e)[:100]}"})
         session['last_transfer_outcome'] = last_outcome; session.modified = True
-        log_failed_attempt(sender_id, receiver_id, amount if isinstance(amount, Decimal) else Decimal('0.00'), "INPUT_ERROR", exception_info=e)
+        amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
+        log_failed_attempt(sender_id, receiver_id, amount_for_log, "INPUT_ERROR", exception_info=e)
         return redirect(url_for('index'))
     except Exception as e:
         logging.error(f"Unexpected input error: {e}", exc_info=True); flash("Unexpected error.", "error"); last_outcome.update({'status': 'Failed', 'reason': "Unexpected Input Error"})
         session['last_transfer_outcome'] = last_outcome; session.modified = True
-        log_failed_attempt(sender_id, receiver_id, amount if isinstance(amount, Decimal) else Decimal('0.00'), "UNEXPECTED_INPUT_ERR", exception_info=e)
+        amount_for_log = amount if isinstance(amount, Decimal) else (Decimal(str(amount)) if amount is not None else Decimal('0.00'))
+        log_failed_attempt(sender_id, receiver_id, amount_for_log, "UNEXPECTED_INPUT_ERR", exception_info=e)
         return redirect(url_for('index'))
 
     # --- Eavesdropper Alert ---
@@ -1558,7 +1578,7 @@ def transfer_funds():
         try:
             ip_address = None
             if 'RENDER' in os.environ: # Check if on Render
-                octet1 = random.choice([10, 172, 192, random.randint(1, 223)]); octet3 = random.randint(0, 254); octet4 = random.randint(1, 254)
+                octet1=random.choice([10, 172, 192, random.randint(1, 223)]); octet3=random.randint(0, 254); octet4=random.randint(1, 254)
                 if octet1 == 172: octet2 = random.randint(16, 31)
                 elif octet1 == 192: octet2 = 168
                 else: octet2 = random.randint(0, 254)
@@ -1585,7 +1605,7 @@ def transfer_funds():
             elif not admin_email: current_app.logger.warning("ADMIN_ALERT_EMAIL not set, skipping alert.")
             else: current_app.logger.warning("Mail system unavailable, skipping alert.")
         except Exception as alert_err: current_app.logger.error(f"Error in eavesdropper alerting: {alert_err}", exc_info=True)
-          
+
     # --- 2. QKD Simulation ---
     qber_thresh = app.config['QBER_THRESHOLD']; n_qubits = app.config['QKD_NUM_QUBITS']; eve_rate = 0.25 if simulate_eve_checked else 0.0; qkd_fraud_reason = None
     try:
@@ -1698,12 +1718,10 @@ def transfer_funds():
         # Log Transaction
         log_status = "DB_LOGGING"; log_qber = qber if qber >= 0 else None; log_reason = final_reason[:255] if final_reason else None
         log_ts = datetime.datetime.now(datetime.timezone.utc)
-        log_vals = (sender_id, receiver_id, str(amount), qkd_status, enc_b64, None, log_qber, final_flagged, log_reason, log_ts)
+        log_vals = (sender_id, receiver_id, str(amount), qkd_status, enc_b64, None, log_qber, final_flagged, log_reason, log_ts) # Use final_flagged here
         log_id = None # Initialize log_id
 
         # --- CORRECTED LOGIC FOR PG/MYSQL ID RETRIEVAL ---
-        # Use db_type which was determined during cursor creation
-        # Perform case-insensitive comparison for safety
         if db_type.lower() == 'postgresql': # Use .lower() and full name
             # Quote "timestamp" if it's a reserved word in your PG version/schema
             log_sql = """INSERT INTO qkd_transaction_log (sender_account_id, receiver_account_id, amount, qkd_status, encrypted_confirmation, iv, qber_value, is_flagged, fraud_reason, "timestamp") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING log_id"""
@@ -1752,7 +1770,7 @@ def transfer_funds():
         if log_id is None:
              logging.error("Log ID is still None after attempting DB-specific retrieval methods.")
              raise DB_ERROR_TYPE("Failed to obtain log ID after insert.")
-        # --- END Final Check ---
+        # --- END CORRECTED LOGIC ---
 
         last_outcome['log_id'] = log_id;
         logging.info(f"Transaction successfully logged with ID: {log_id}")
@@ -1814,7 +1832,6 @@ def transfer_funds():
     session['last_transfer_outcome'] = last_outcome; session.modified = True
     # Ensure parentheses are balanced in the final redirect
     return redirect(url_for('index'))
-
 
 # === HISTORY ROUTE ===
 @app.route('/history', methods=['GET'])
