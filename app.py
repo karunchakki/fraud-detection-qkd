@@ -737,7 +737,7 @@ def log_failed_attempt(sender_id, receiver_id, amount, failed_status, qber_value
         log_values = (
             sender_id_val, receiver_id_val, amount_str, failed_status[:50], # Truncate status
             qber_db_val, is_flagged, reason_text,
-            datetime.datetime.now(), # Timestamp of the failure logging
+            datetime.datetime.now(timezone.utc), # Timestamp of the failure logging
             None, None # No encrypted data/IV for failed attempts
         )
         log_cursor.execute(log_sql, log_values)
