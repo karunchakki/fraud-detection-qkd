@@ -4,21 +4,23 @@
 # Version: Verified Working (Post User Confirmation & Final Cleanup)
 
 # --- Core Imports ---
+import base64
+import datetime
+import hashlib
+import logging
+import os
+import random
+import traceback
+from decimal import Decimal, InvalidOperation
+from functools import wraps
+from threading import Thread
+
+# --- Third-Party Library Imports ---
+from cryptography.fernet import Fernet, InvalidToken
+from dotenv import load_dotenv
 from flask import (Flask, request, render_template, flash, redirect, url_for,
                    session, g, current_app, Response, abort, get_flashed_messages)
-from functools import wraps
-import os
-import datetime
-import base64
-import hashlib
-import traceback
-import logging
-import random
-from threading import Thread
-from decimal import Decimal, InvalidOperation
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
-from flask_mail import Mail, Message
-from cryptography.fernet import Fernet, InvalidToken
 
 # --- Environment Variable Loading ---
 from dotenv import load_dotenv
