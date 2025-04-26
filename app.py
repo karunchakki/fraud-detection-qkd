@@ -14,6 +14,7 @@ import traceback
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from threading import Thread
+from datetime import timezone
 
 # --- Third-Party Library Imports ---
 from cryptography.fernet import Fernet, InvalidToken
@@ -50,7 +51,6 @@ except ImportError:
 except Exception as e:
     psycopg2 = None
     logging.error(f"--- Unexpected error importing psycopg2: {e} ---")
-
 
 # --- Attempt MySQL Import ---
 try:
@@ -176,6 +176,29 @@ except ImportError as e:
 except ModuleNotFoundError as e:
     print(f"\nERROR: A library required by local modules might be missing: {e}")
     exit(1)
+
+# --- Define Global Timezone ---
+# (Placed after imports and app initialization/config loading)
+LOCAL_TIMEZONE = pytz.utc # Default to UTC if pytz is not available or invalid timezone set
+if PYTZ_AVAILABLE:
+    try:
+        # Use environment variable if set, otherwise default to IST
+        LOCAL_TIMEZONE_STR = os.environ.get('LOCAL_TIMEZONE', 'Asia/Kolkata')
+        LOCAL_TIMEZONE = pytz.timezone(LOCAL_TIMEZONE_STR)
+        logging.info(f"--- Using local timezone for display: {LOCAL_TIMEZONE_STR} ---")
+    except pytz.UnknownTimeZoneError:
+        logging.error(f"--- Invalid LOCAL_TIMEZONE '{LOCAL_TIMEZONE_STR}', defaulting to UTC. ---")
+        # LOCAL_TIMEZONE remains pytz.utc from initialization
+else:
+     logging.warning("--- pytz not available, timestamps will be displayed in UTC. ---")
+
+# Define your target local timezone
+try:
+    import pytz # Import pytz
+    PYTZ_AVAILABLE = True
+except ImportError:
+    PYTZ_AVAILABLE = False
+    logging.warning("pytz library not found. Timezone conversion disabled. `pip install pytz`")
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
@@ -1899,7 +1922,7 @@ def history():
 
 
         for entry in entries_raw:
-            try:
+            try: # Inner try for formatting each log entry safely
                 amt = Decimal(entry.get('amount', '0.00'))
                 qber_raw = entry.get('qber'); qber_val = f"{qber_raw:.3f}" if qber_raw is not None else "N/A"
                 qkd_raw_status = entry.get('qkd_status',''); enc_status = "[Encrypted]" if entry.get('enc_confirm') else "[N/A]"
@@ -1908,22 +1931,21 @@ def history():
                 direction = "Sent" if entry.get('sender_cust_id') == user_id else ("Received" if entry.get('receiver_cust_id') == user_id else "")
 
                 # --- Timestamp Formatting with Timezone Conversion ---
-                ts_aware_utc = entry.get('ts') # TIMESTAMPTZ from PG should be aware UTC
+                ts_aware_utc = entry.get('ts')
                 timestamp_display = 'N/A'
                 if isinstance(ts_aware_utc, datetime.datetime):
-                     # Ensure it's timezone-aware (it should be)
-                     if ts_aware_utc.tzinfo is None or ts_aware_utc.tzinfo.utcoffset(ts_aware_utc) is None:
-                          # If somehow naive, assume UTC (common DB driver behavior)
-                          ts_aware_utc = pytz.utc.localize(ts_aware_utc)
-                     # Convert to local timezone defined above (e.g., LOCAL_TIMEZONE = pytz.timezone('Asia/Kolkata'))
-                     # Make sure to define LOCAL_TIMEZONE globally or pass it
-                     # For now, assume it's defined globally:
-                     # ts_local = ts_aware_utc.astimezone(LOCAL_TIMEZONE)
-                     # timestamp_display = ts_local.strftime('%Y-%m-%d %H:%M:%S %Z') # Example format
+                    if ts_aware_utc.tzinfo is None or ts_aware_utc.tzinfo.utcoffset(ts_aware_utc) is None:
+                         ts_aware_utc = pytz.utc.localize(ts_aware_utc)
+                         logging.debug(f"History log {entry.get('log_id')}: Naive timestamp localized to UTC.")
+                    try:
+                        ts_local = ts_aware_utc.astimezone(LOCAL_TIMEZONE) # Uses global LOCAL_TIMEZONE
+                        timestamp_display = ts_local.strftime('%Y-%m-%d %H:%M:%S %Z') # Format with timezone
+                    except Exception as tz_err_hist:
+                         logging.warning(f"Timezone conversion failed history log {entry.get('log_id')}: {tz_err_hist}. Displaying UTC.")
+                         timestamp_display = ts_aware_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+                # --- End Timestamp Conversion ---
 
-                     # ** TEMPORARY: Display as UTC until LOCAL_TIMEZONE is properly set up **
-                     timestamp_display = ts_aware_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
-
+                # Append formatted entry to display list
                 display_log.append({
                     'id': entry.get('log_id'),
                     'timestamp': timestamp_display, # Use the formatted string
@@ -1940,7 +1962,7 @@ def history():
                 })
             except Exception as display_err:
                 logging.warning(f"Error formatting history entry {entry.get('log_id', '?')}: {display_err}", exc_info=True)
-
+              
     except (DB_ERROR_TYPE, ConnectionError) as e:
         flash(f"Database error retrieving history: {e}", "error")
         logging.error(f"History DB error ({db_type}) for user {user_id}: {e}", exc_info=True)
@@ -2284,143 +2306,72 @@ def fraud_page():
 def get_log_entry_details(log_id):
     """
     Fetches detailed information for a specific transaction log entry.
-    Adapted for PostgreSQL/MySQL. Returns dict or None.
+    Adapted for PostgreSQL/MySQL. Converts timestamp to local time. Returns dict or None.
     """
-    details = None
-    conn = None # Initialize outside try
-    cursor = None
-    db_type = "Unknown" # Initialize
+    details = None; conn = None; cursor = None; db_type = "Unknown"
     logging.info(f"--- Fetching log details for log_id: {log_id} ---")
-
     try:
-        conn = get_db_connection() # Attempt connection
-        if not conn:
-            logging.error(f"DB Connection failed fetching log details for {log_id}")
-            return None # Cannot proceed without connection
+        conn = get_db_connection();
+        if not conn: logging.error(f"DB Conn fail log details {log_id}"); return None
 
-        # Determine cursor type based on connection object
+        # Determine cursor type
+        cursor_created = False
         if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDictCursor for PG
-            db_type = "PostgreSQL"
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor); db_type = "PostgreSQL"; cursor_created = True
         elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
-            cursor = conn.cursor(dictionary=True) # Use dictionary=True for MySQL
-            db_type = "MySQL"
-        else: # Fallback if type unknown or driver missing
-            logging.warning(f"get_log_entry_details: Unknown DB type for conn {conn}, using basic cursor.")
-            cursor = conn.cursor()
-            db_type = "Fallback"
+            cursor = conn.cursor(dictionary=True); db_type = "MySQL"; cursor_created = True
+        if not cursor_created: cursor = conn.cursor(); db_type = "Fallback"; logging.warning(f"get_log_entry_details: Using basic cursor.")
         logging.debug(f"get_log_entry_details: Using {db_type} cursor.")
 
-        # SQL query to fetch transaction log and join with customer names
-        sql = """
-            SELECT
-                l.*, -- Select all columns from the log table
-                s_acc.customer_id AS sender_cust_id,
-                s_cust.customer_name AS sender_name,
-                r_acc.customer_id AS receiver_cust_id,
-                r_cust.customer_name AS receiver_name
-            FROM qkd_transaction_log l
-            LEFT JOIN accounts s_acc ON l.sender_account_id = s_acc.account_id
-            LEFT JOIN customers s_cust ON s_acc.customer_id = s_cust.customer_id
-            LEFT JOIN accounts r_acc ON l.receiver_account_id = r_acc.account_id
-            LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id
-            WHERE l.log_id = %s
-            """
-        cursor.execute(sql, (log_id,))
-        entry = cursor.fetchone() # Fetches RealDictRow (PG), dict (MySQL), or tuple (Fallback)
-        logging.debug(f"Raw DB entry fetched for log {log_id}: {'Found' if entry else 'Not Found'}")
+        sql = """ SELECT l.*, s_acc.customer_id AS sender_cust_id, s_cust.customer_name AS sender_name, r_acc.customer_id AS receiver_cust_id, r_cust.customer_name AS receiver_name FROM qkd_transaction_log l LEFT JOIN accounts s_acc ON l.sender_account_id = s_acc.account_id LEFT JOIN customers s_cust ON s_acc.customer_id = s_cust.customer_id LEFT JOIN accounts r_acc ON l.receiver_account_id = r_acc.account_id LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id WHERE l.log_id = %s """
+        cursor.execute(sql, (log_id,)); entry = cursor.fetchone()
+        logging.debug(f"Raw DB entry fetched log {log_id}: {'Found' if entry else 'Not Found'}")
 
         if entry:
-            # Inner try block for safe data formatting
-            try:
-                # Safely get and format amount
-                amt_val = entry.get('amount') # Use .get() for dict-like access
-                amt_decimal = Decimal(str(amt_val)) if amt_val is not None else Decimal('0.00')
-                amount_display = f"{amt_decimal:.2f}"
+            try: # Inner try for formatting
+                amt_dec=Decimal(str(entry.get('amount','0.00'))); amt_disp=f"{amt_dec:.2f}"
+                qber_raw=entry.get('qber_value'); qber_disp=f"{qber_raw:.4f}" if qber_raw is not None else "N/A"
 
-                # Safely get and format QBER
-                qber_val = entry.get('qber_value')
-                qber_display = f"{qber_val:.4f}" if qber_val is not None and isinstance(qber_val, (float, Decimal)) else "N/A"
+                # --- TIMESTAMP CONVERSION ---
+                ts_from_db = entry.get('timestamp')
+                timestamp_display = 'N/A'
+                if isinstance(ts_from_db, datetime.datetime):
+                    # Make naive UTC aware if necessary (fallback)
+                    if ts_from_db.tzinfo is None or ts_from_db.tzinfo.utcoffset(ts_from_db) is None:
+                         ts_aware_utc = pytz.utc.localize(ts_from_db)
+                         logging.warning(f"Timestamp for log {log_id} was naive, assuming UTC.")
+                    else:
+                         ts_aware_utc = ts_from_db # Already aware (expected from TIMESTAMPTZ)
+                    # Convert to local zone
+                    try:
+                        ts_local = ts_aware_utc.astimezone(LOCAL_TIMEZONE) # Uses global LOCAL_TIMEZONE
+                        # Format including timezone name/offset
+                        timestamp_display = ts_local.strftime('%Y-%m-%d %H:%M:%S %Z%z')
+                    except Exception as tz_err:
+                         logging.error(f"Timezone conversion failed log {log_id}: {tz_err}. Displaying UTC.")
+                         timestamp_display = ts_aware_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+                # --- END TIMESTAMP CONVERSION ---
 
-                # Safely get and format timestamp
-                ts_val = entry.get('timestamp')
-                # Format as UTC assuming the DB stores it that way (recommended)
-                timestamp_display = ts_val.strftime('%Y-%m-%d %H:%M:%S UTC') if isinstance(ts_val, datetime.datetime) else 'N/A'
+                flagged=entry.get('is_flagged', False); reason_raw=entry.get('fraud_reason'); reason_disp=reason_raw if flagged and reason_raw else None
+                enc_data=entry.get('encrypted_confirmation'); enc_data=enc_data if enc_data and enc_data != 'None' else None
+                s_name=entry.get('sender_name','?'); s_id=entry.get('sender_account_id','?'); s_details=f"{s_name} (Acc ID: {s_id})"
+                r_name=entry.get('receiver_name','?'); r_id=entry.get('receiver_account_id','?'); r_details=f"{r_name} (Acc ID: {r_id})"
 
-                # Get flag status and reason
-                is_flagged = entry.get('is_flagged', False)
-                raw_reason = entry.get('fraud_reason')
-                # Assign reason string only if actually flagged, otherwise None
-                reason_display = raw_reason if is_flagged and raw_reason else None
-
-                # Get encrypted data, ensure None if missing or "None" string stored
-                enc_data = entry.get('encrypted_confirmation')
-                enc_data = enc_data if enc_data and enc_data != 'None' else None
-
-                # Format sender/receiver details safely
-                sender_name = entry.get('sender_name', '?')
-                sender_acc_id = entry.get('sender_account_id', '?')
-                receiver_name = entry.get('receiver_name', '?')
-                receiver_acc_id = entry.get('receiver_account_id', '?')
-                sender_details = f"{sender_name} (Acc ID: {sender_acc_id})"
-                receiver_details = f"{receiver_name} (Acc ID: {receiver_acc_id})"
-
-                # Construct the final dictionary
-                details = {
-                    'log_id': entry.get('log_id'), # Use .get() for safety
-                    'sender_customer_id': entry.get('sender_cust_id'),
-                    'receiver_customer_id': entry.get('receiver_cust_id'),
-                    'timestamp': timestamp_display,
-                    'sender_details': sender_details,
-                    'receiver_details': receiver_details,
-                    'amount': amount_display,
-                    'qkd_status': entry.get('qkd_status', 'N/A').replace('_', ' '),
-                    'qber': qber_display,
-                    'encrypted_confirmation_data': enc_data, # Contains data or None
-                    'is_flagged': is_flagged,
-                    'fraud_reason': reason_display, # Contains reason string or None
-                }
-                logging.debug(f"Formatted details dictionary for log {log_id}: {details}")
-
-            except (InvalidOperation, TypeError, ValueError, KeyError) as format_err:
-                # Catch potential errors during formatting (KeyError if tuple fallback used incorrectly)
-                logging.error(f"Error formatting data for log ID {log_id}: {format_err}")
-                details = None # Set details to None if formatting fails
-            except Exception as format_err_other:
-                 logging.error(f"Unexpected error formatting log {log_id}: {format_err_other}", exc_info=True)
-                 details = None
-        else:
-            logging.warning(f"Log entry with ID {log_id} not found in DB.")
-            details = None # Ensure details is None if entry not found
-
-    except DB_ERROR_TYPE as e: # Catch specific DB errors
-        logging.error(f"Database error ({db_type}) fetching details for log ID {log_id}: {e}", exc_info=True)
-        details = None # Ensure details is None on DB error
-    except ConnectionError as e: # Catch connection errors specifically
-        logging.error(f"Connection error fetching details for log ID {log_id}: {e}", exc_info=True)
-        details = None
-    except Exception as e: # Catch other unexpected errors
-         logging.error(f"Unexpected error fetching details for log {log_id}: {e}", exc_info=True)
-         details = None
+                details={'log_id': entry.get('log_id'), 'sender_customer_id': entry.get('sender_cust_id'), 'receiver_customer_id': entry.get('receiver_cust_id'),
+                         'timestamp': timestamp_display, # Use formatted string
+                         'sender_details': s_details, 'receiver_details': r_details, 'amount': amt_disp,
+                         'qkd_status': entry.get('qkd_status', 'N/A').replace('_', ' '), 'qber': qber_disp,
+                         'encrypted_confirmation_data': enc_data, 'is_flagged': flagged, 'fraud_reason': reason_disp}
+                logging.debug(f"Formatted details log {log_id}: {details}")
+            except Exception as format_err: logging.error(f"Error formatting log {log_id}: {format_err}", exc_info=True); details = None
+        else: logging.warning(f"Log entry {log_id} not found.")
+    except (DB_ERROR_TYPE, ConnectionError) as e: logging.error(f"DB/Conn error log details ({db_type}) {log_id}: {e}"); details = None
+    except Exception as e: logging.error(f"Unexpected log details error {log_id}: {e}", exc_info=True); details = None
     finally:
-        # --- Corrected Finally Block ---
-        if cursor and not getattr(cursor, 'closed', True): # Check cursor exists and not closed
-            try:
-                cursor.close()
-            except DB_ERROR_TYPE: # Use global DB_ERROR_TYPE
-                 # logging.warning(f"DBError closing get_details cursor: {db_close_err}") # Optional log
-                 pass # Ignore DB-specific errors during close
-            except Exception as cur_close_err: # Catch other potential close errors
-                logging.warning(f"Non-DB error closing get_details cursor: {cur_close_err}")
-
-        # Always close the connection if it was obtained and not closed
-        if conn and not getattr(conn, 'closed', True): # Check if conn was successfully assigned and not closed
-            close_db_connection(conn)
-        # --- End Corrected Cleanup ---
-
+        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
+        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
     logging.info(f"--- Finished fetching log details {log_id}. Found: {bool(details)} ---")
     return details
-
 
 
 @app.route('/report/download/<int:log_id>')
