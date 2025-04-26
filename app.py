@@ -178,27 +178,33 @@ except ModuleNotFoundError as e:
     exit(1)
 
 # --- Define Global Timezone ---
-# (Placed after imports and app initialization/config loading)
-LOCAL_TIMEZONE = pytz.utc # Default to UTC if pytz is not available or invalid timezone set
-if PYTZ_AVAILABLE:
+# Default to UTC *using datetime library* if pytz unavailable
+LOCAL_TIMEZONE = timezone.utc # Use datetime.timezone.utc as the safe default
+
+if PYTZ_AVAILABLE and pytz: # Check both flag and that pytz object exists
     try:
-        # Use environment variable if set, otherwise default to IST
         LOCAL_TIMEZONE_STR = os.environ.get('LOCAL_TIMEZONE', 'Asia/Kolkata')
-        LOCAL_TIMEZONE = pytz.timezone(LOCAL_TIMEZONE_STR)
+        LOCAL_TIMEZONE = pytz.timezone(LOCAL_TIMEZONE_STR) # Use pytz timezone if available
         logging.info(f"--- Using local timezone for display: {LOCAL_TIMEZONE_STR} ---")
     except pytz.UnknownTimeZoneError:
         logging.error(f"--- Invalid LOCAL_TIMEZONE '{LOCAL_TIMEZONE_STR}', defaulting to UTC. ---")
-        # LOCAL_TIMEZONE remains pytz.utc from initialization
+        LOCAL_TIMEZONE = pytz.utc # Fallback to pytz UTC
+    except Exception as tz_err:
+         logging.error(f"--- Error setting pytz timezone, defaulting to UTC: {tz_err} ---")
+         LOCAL_TIMEZONE = pytz.utc # Fallback to pytz UTC
 else:
-     logging.warning("--- pytz not available, timestamps will be displayed in UTC. ---")
+     logging.warning(f"--- pytz not available (available={PYTZ_AVAILABLE}), timestamps will use basic UTC. ---")
+     # LOCAL_TIMEZONE remains datetime.timezone.utc
 
 # Define your target local timezone
 try:
-    import pytz # Import pytz
+    import pytz
     PYTZ_AVAILABLE = True
+    logging.info("--- pytz library found. Timezone conversion enabled. ---")
 except ImportError:
     PYTZ_AVAILABLE = False
-    logging.warning("pytz library not found. Timezone conversion disabled. `pip install pytz`")
+    pytz = None # Define as None if not available
+    logging.warning("--- pytz library not found. Timezone conversion disabled. `pip install pytz` ---")
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
