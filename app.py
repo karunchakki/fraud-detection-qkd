@@ -2016,39 +2016,55 @@ def history():
 def qkd_page():
     """Displays QKD info, last sim log, and QBER chart."""
     user_id = g.user['id']
-    logging.info(f"--- User {user_id} accessing QKD page ---") # Add start log
+    logging.info(f"--- User {user_id} accessing QKD page ---")
 
     # --- 1. Get Last Simulation Log ---
-    sim_log = None # Default to None
+    sim_log = None
     log_key = f'last_qkd_log_{user_id}'
     try:
         sim_log = session.get(log_key, None)
         logging.debug(f"Retrieved sim_log from session key '{log_key}': {type(sim_log)}")
-        if isinstance(sim_log, dict):
-             logging.debug(f"Sim log keys: {list(sim_log.keys())}")
-        elif sim_log is not None:
-             logging.warning(f"Sim log retrieved from session is not a dictionary: {sim_log}")
     except Exception as session_err:
-        logging.error(f"Error retrieving QKD simulation log from session for user {user_id}: {session_err}", exc_info=True)
-        flash("Could not load previous simulation data due to a session error.", "warning")
+        logging.error(f"Error retrieving QKD log from session user {user_id}: {session_err}", exc_info=True)
+        flash("Could not load previous simulation data.", "warning")
 
     # --- 2. Fetch QBER History for Chart ---
     labels = []; values = []
     conn = None; cursor = None; limit = 15
+    db_type = "Unknown" # Initialize
 
     try: # Outer try for DB operations
         conn = get_db_connection()
         if conn:
-            logging.debug("DB connection successful for QBER history fetch.")
-            cursor = conn.cursor(dictionary=True)
-            sql = """ SELECT l.log_id, l.timestamp, l.qber_value AS qber
-                      FROM qkd_transaction_log l
-                      LEFT JOIN accounts s ON l.sender_account_id=s.account_id
-                      LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
-                      WHERE (s.customer_id=%s OR r.customer_id=%s)
-                        AND l.qber_value IS NOT NULL AND l.qber_value >= 0
-                        AND (l.qkd_status LIKE 'SECURED%' OR l.qkd_status = 'QKD_EVE_DETECTED')
-                      ORDER BY l.timestamp DESC LIMIT %s """
+            # --- CORRECTED CURSOR CREATION ---
+            cursor_created = False
+            db_type = "Unknown" # Initialize db_type
+
+            if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDict for PG
+                db_type = "PostgreSQL"; cursor_created = True
+                logging.debug("QKD Page: Using psycopg2 RealDictCursor.")
+            elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+                cursor = conn.cursor(dictionary=True) # Correct for MySQL
+                db_type = "MySQL"; cursor_created = True
+                logging.debug("QKD Page: Using mysql.connector dictionary cursor.")
+
+            if not cursor_created:
+                 # Fallback or raise error if needed
+                 logging.error(f"QKD Page: Unsupported DB type: {type(conn)}")
+                 raise ConnectionError("Unsupported DB type for QKD page history.")
+            # --- END CORRECTED CURSOR CREATION ---
+
+            sql = """
+                SELECT l.log_id, l.timestamp, l.qber_value AS qber
+                FROM qkd_transaction_log l
+                LEFT JOIN accounts s ON l.sender_account_id=s.account_id
+                LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
+                WHERE (s.customer_id=%s OR r.customer_id=%s)
+                  AND l.qber_value IS NOT NULL AND l.qber_value >= 0
+                  AND (l.qkd_status LIKE 'SECURED%%' OR l.qkd_status = 'QKD_EVE_DETECTED')
+                ORDER BY l.timestamp DESC LIMIT %s
+                """
             logging.debug(f"Executing QBER history SQL with params: ({user_id}, {user_id}, {limit})")
             cursor.execute(sql, (user_id, user_id, limit))
             history = cursor.fetchall()
@@ -2056,18 +2072,15 @@ def qkd_page():
             history.reverse() # Oldest first for chart
 
             for entry in history:
-                logging.debug(f"Processing history entry: {entry}")
+                # Using .get() is safer with dictionary-like cursors
                 log_id = entry.get('log_id'); qber_val = entry.get('qber'); ts = entry.get('timestamp')
                 if log_id and qber_val is not None and ts:
                     label = f"{ts.strftime('%m/%d %H:%M')} (ID:{log_id})"
                     try:
-                        logging.debug(f"Attempting to convert QBER value '{qber_val}' (type: {type(qber_val)}) to float.")
                         qber_pct = float(qber_val) * 100
                         labels.append(label); values.append(round(qber_pct, 2))
                     except (ValueError, TypeError) as chart_err:
                         logging.warning(f"Could not process QBER value '{qber_val}' for chart (Log ID: {log_id}): {chart_err}")
-                    except Exception as inner_chart_err: # Catch any other unexpected errors here
-                         logging.error(f"Unexpected error processing chart data for log {log_id}: {inner_chart_err}", exc_info=True)
                 else:
                     logging.warning(f"Skipping history entry due to missing data: {entry}")
 
@@ -2076,58 +2089,46 @@ def qkd_page():
             labels, values = ['DB Unavailable'], [0]
             flash("Could not load QBER history due to a database connection issue.", "error")
 
-    except MySQLError as e: # Catch DB errors
-        logging.error(f"Database error fetching QBER history for user {user_id}: {e}", exc_info=True)
+    except DB_ERROR_TYPE as e: # Catch specific DB errors (PG or MySQL)
+        logging.error(f"QBER history DB error ({db_type}) user {user_id}: {e}", exc_info=True)
         labels, values = ['DB Error'], [0]
-        flash("An error occurred while retrieving QBER history.", "error")
+        flash("Database error loading QBER history.", "error")
+    except ConnectionError as e: # Catch connection errors explicitly
+        logging.error(f"QBER history Connection Error user {user_id}: {e}")
+        labels, values = ['DB Conn Error'], [0]
+        flash("Database connection error loading QBER history.", "error")
     except Exception as e: # Catch other unexpected errors
          logging.error(f"Unexpected error fetching/processing QBER history for user {user_id}: {e}", exc_info=True)
          labels, values = ['Processing Error'], [0]
          flash("An unexpected error occurred while processing history data.", "error")
     finally: # Ensure cleanup
-         if cursor:
+         if cursor and not getattr(cursor, 'closed', True):
              try: cursor.close()
-             except MySQLError as cur_e: logging.error(f"Error closing QBER history cursor: {cur_e}")
-         if conn: close_db_connection(conn)
-         logging.debug("Finished QBER history fetch attempt.")
+             except DB_ERROR_TYPE: pass # Ignore DB specific close errors
+             except Exception as cur_e: logging.error(f"Error closing QKD page cursor: {cur_e}")
+         if conn and not getattr(conn, 'closed', True):
+             close_db_connection(conn)
+         logging.debug("Finished QKD page history fetch attempt.")
 
     # --- 3. Prepare Data for Template ---
     if not labels: labels, values = ['No History'], [0] # Default chart data
 
-    # *** FIX: Define qber_threshold_original consistently ***
-    qber_threshold_config = current_app.config.get('QBER_THRESHOLD', 0.15)
-    qber_threshold_original = 0.15 # Default original value
-    qber_threshold_pct = 15.0      # Default percentage value
-    try:
-        logging.debug(f"QBER Threshold from config: {qber_threshold_config} (type: {type(qber_threshold_config)})")
-        # Assign to the correct variable name WITHOUT underscore
-        qber_threshold_original = float(qber_threshold_config)
-        qber_threshold_pct = qber_threshold_original * 100
-    except (ValueError, TypeError) as thresh_err:
-         logging.error(f"Invalid QBER_THRESHOLD configuration value: {qber_threshold_config} - {thresh_err}")
-         # Keep the defaults defined above
-         flash("Error reading QBER threshold configuration. Using default.", "warning")
-    # *** END FIX ***
+    # Get threshold values from app config
+    qber_threshold_original = app.config.get('QBER_THRESHOLD', 0.15) # Use .get with default
+    qber_threshold_pct = qber_threshold_original * 100
 
     # --- 4. Render Template ---
     try:
-        logging.debug(f"Rendering qkd.html with sim_log type: {type(sim_log)}")
-        logging.debug(f"Passing QBER threshold original: {qber_threshold_original}") # Pass original
-        logging.debug(f"Passing QBER threshold %: {qber_threshold_pct}")
-        logging.debug(f"Passing history labels: {labels}")
-        logging.debug(f"Passing history values: {values}")
-
+        logging.debug(f"Rendering qkd.html: sim_log={bool(sim_log)}, threshold_pct={qber_threshold_pct}, threshold_orig={qber_threshold_original}, labels_len={len(labels)}")
         return render_template('qkd.html',
                            simulation_log=sim_log,
-                           QBER_THRESHOLD_PCT=qber_threshold_pct, # For display/chart line
-                           # *** Ensure this uses the corrected variable name ***
-                           QBER_THRESHOLD_ORIGINAL=qber_threshold_original, # For comparisons in template
-                           qber_history_labels=labels, # Renamed for clarity
-                           qber_history_values=values) # Renamed for clarity
+                           QBER_THRESHOLD_PCT=qber_threshold_pct,
+                           QBER_THRESHOLD_ORIGINAL=qber_threshold_original,
+                           qber_history_labels=labels,
+                           qber_history_values=values)
     except Exception as render_err:
          logging.error(f"Error rendering qkd.html template: {render_err}", exc_info=True)
-         abort(500) # Trigger 500 handler
-
+         abort(500)
 
 @app.route('/qkd/report/download')
 @login_required
