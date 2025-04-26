@@ -1833,40 +1833,39 @@ def transfer_funds():
     # Ensure parentheses are balanced in the final redirect
     return redirect(url_for('index'))
 
-# === HISTORY ROUTE ===
 @app.route('/history', methods=['GET'])
 @login_required
 def history():
     """Displays transaction history for the logged-in user."""
-    # Ensure g.user is populated
     if not g.user or 'id' not in g.user:
         flash("User session error. Please log in again.", "error")
         return redirect(url_for('login'))
     user_id = g.user['id']
 
     display_log = []
-    conn = None # Initialize conn to None
-    cursor = None # Initialize cursor to None
-    db_error_type = psycopg2.Error if POSTGRES_AVAILABLE else (MySQLError if MYSQL_AVAILABLE else Exception)
-    
+    conn = None; cursor = None; db_type = "Unknown"
+
     try:
-        # Ensure get_db_connection is defined
         conn = get_db_connection()
         if not conn:
             flash("Database error. Cannot load history.", "error")
-            # Render template with empty list if connection fails
-            return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('username'))
+            return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('name')) # Use name
 
-        # Create cursor based on connection type
+        # --- CORRECTED CURSOR CREATION ---
+        cursor_created = False
+        db_type = "Unknown"
         if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
-             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            db_type = "PostgreSQL"; cursor_created = True
         elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
-             cursor = conn.cursor(dictionary=True) # No buffer needed for SELECT
-        else:
+            cursor = conn.cursor(dictionary=True)
+            db_type = "MySQL"; cursor_created = True
+        if not cursor_created:
+             logging.error(f"History: Unsupported DB type: {type(conn)}")
              raise ConnectionError("Cannot determine cursor type for history.")
+        logging.debug(f"History: Using {db_type} cursor.")
+        # --- END CORRECTION ---
 
-        # SQL to fetch history involving the user as sender OR receiver
-        # Use LEFT JOINs to get names even if accounts/customers were deleted (unlikely in this schema)
         sql = """
             SELECT l.log_id, l.timestamp AS ts,
                    l.sender_account_id AS sender_id, s_cust.customer_name AS sender_name, s_acc.customer_id AS sender_cust_id,
@@ -1880,78 +1879,81 @@ def history():
             LEFT JOIN customers r_cust ON r_acc.customer_id = r_cust.customer_id
             WHERE s_acc.customer_id = %s OR r_acc.customer_id = %s
             ORDER BY l.timestamp DESC
-            LIMIT 100 -- Limit the number of history entries shown
-        """
+            LIMIT 100
+            """
         cursor.execute(sql, (user_id, user_id))
         entries_raw = cursor.fetchall()
 
-        # Format entries for display
+        # --- Timezone Conversion Setup (Add near imports if not already there) ---
+        # import pytz
+        # try:
+        #     # Use environment variable or default to IST
+        #     LOCAL_TIMEZONE_STR = os.environ.get('LOCAL_TIMEZONE', 'Asia/Kolkata')
+        #     LOCAL_TIMEZONE = pytz.timezone(LOCAL_TIMEZONE_STR)
+        # except pytz.UnknownTimeZoneError:
+        #     logging.error(f"Invalid LOCAL_TIMEZONE '{LOCAL_TIMEZONE_STR}', defaulting to UTC.")
+        #     LOCAL_TIMEZONE = pytz.utc
+        # --- End Timezone Setup ---
+
+
         for entry in entries_raw:
-            try: # Inner try for formatting each log entry safely
-                amt = Decimal(entry.get('amount', '0.00')) # Default to 0 if amount is missing/invalid
-                qber_val = f"{entry.get('qber'):.3f}" if entry.get('qber') is not None else "N/A"
+            try:
+                amt = Decimal(entry.get('amount', '0.00'))
+                qber_raw = entry.get('qber'); qber_val = f"{qber_raw:.3f}" if qber_raw is not None else "N/A"
+                qkd_raw_status = entry.get('qkd_status',''); enc_status = "[Encrypted]" if entry.get('enc_confirm') else "[N/A]"
+                if "FAIL" in qkd_raw_status or "ERR" in qkd_raw_status: enc_status = "[N/A - Failed Txn]"
+                is_flagged = entry.get('is_flagged', False); raw_reason = entry.get('fraud_reason'); display_reason = raw_reason if is_flagged and raw_reason else ("Yes" if is_flagged else "No")
+                direction = "Sent" if entry.get('sender_cust_id') == user_id else ("Received" if entry.get('receiver_cust_id') == user_id else "")
 
-                # Determine status of encrypted details
-                enc_status = "[Encrypted]" if entry.get('enc_confirm') else "[N/A]"
-                qkd_raw_status = entry.get('qkd_status','')
-                if qkd_raw_status and ("FAIL" in qkd_raw_status or "ERROR" in qkd_raw_status or "ABORT" in qkd_raw_status):
-                     enc_status = "[N/A - Failed Txn]"
+                # --- Timestamp Formatting with Timezone Conversion ---
+                ts_aware_utc = entry.get('ts') # TIMESTAMPTZ from PG should be aware UTC
+                timestamp_display = 'N/A'
+                if isinstance(ts_aware_utc, datetime.datetime):
+                     # Ensure it's timezone-aware (it should be)
+                     if ts_aware_utc.tzinfo is None or ts_aware_utc.tzinfo.utcoffset(ts_aware_utc) is None:
+                          # If somehow naive, assume UTC (common DB driver behavior)
+                          ts_aware_utc = pytz.utc.localize(ts_aware_utc)
+                     # Convert to local timezone defined above (e.g., LOCAL_TIMEZONE = pytz.timezone('Asia/Kolkata'))
+                     # Make sure to define LOCAL_TIMEZONE globally or pass it
+                     # For now, assume it's defined globally:
+                     # ts_local = ts_aware_utc.astimezone(LOCAL_TIMEZONE)
+                     # timestamp_display = ts_local.strftime('%Y-%m-%d %H:%M:%S %Z') # Example format
 
-                # Format fraud flag display
-                is_flagged = entry.get('is_flagged', False)
-                raw_reason = entry.get('fraud_reason')
-                # Show specific reason if flagged, otherwise just 'Yes'/'No'
-                display_reason = raw_reason if is_flagged and raw_reason else ("Yes" if is_flagged else "No")
+                     # ** TEMPORARY: Display as UTC until LOCAL_TIMEZONE is properly set up **
+                     timestamp_display = ts_aware_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
 
-                # Determine direction (Sent/Received)
-                direction = ""
-                if entry.get('sender_cust_id') == user_id: direction = "Sent"
-                elif entry.get('receiver_cust_id') == user_id: direction = "Received"
-
-                # Append formatted entry to display list
                 display_log.append({
                     'id': entry.get('log_id'),
-                    'timestamp': entry.get('ts').strftime('%Y-%m-%d %H:%M:%S') if isinstance(entry.get('ts'), datetime.datetime) else 'N/A',
-                    'sender': f"{entry.get('sender_name', 'Unknown')} (Acc ID: {entry.get('sender_id', '?')})",
-                    'receiver': f"{entry.get('receiver_name', 'Unknown')} (Acc ID: {entry.get('receiver_id', '?')})",
-                    'amount': f"{amt:.2f}", # Format amount with 2 decimal places
-                    'qkd_status': qkd_raw_status.replace('_', ' '), # Make status more readable
+                    'timestamp': timestamp_display, # Use the formatted string
+                    'sender': f"{entry.get('sender_name', '?')} ({entry.get('sender_id', '?')})",
+                    'receiver': f"{entry.get('receiver_name', '?')} ({entry.get('receiver_id', '?')})",
+                    'amount': f"{amt:.2f}",
+                    'qkd_status': qkd_raw_status.replace('_', ' '),
                     'qber': qber_val,
                     'encrypted_details_status': enc_status,
                     'is_flagged_display': display_reason,
-                    'fraud_reason': raw_reason, # Keep raw reason available if needed
+                    'fraud_reason': raw_reason,
                     'is_flagged': is_flagged,
                     'direction': direction
                 })
-            except Exception as display_err: # Catch errors during formatting single entry
-                logging.warning(f"Error formatting log entry ID {entry.get('log_id', '?')} for history view: {display_err}", exc_info=True)
-                # Optionally append a placeholder error entry or just skip it
+            except Exception as display_err:
+                logging.warning(f"Error formatting history entry {entry.get('log_id', '?')}: {display_err}", exc_info=True)
 
-    except (psycopg2.Error, MySQLError) as e: # Catch specific DB errors
-         # Check which error type it is if needed, otherwise log generically
-         error_type = "PostgreSQL" if POSTGRESQL_AVAILABLE and isinstance(e, psycopg2.Error) else ("MySQL" if MYSQL_AVAILABLE and isinstance(e, MySQLError) else "Database")
-         flash(f"History retrieval error: {error_type} error occurred.", "error")
-         logging.error(f"History DB error for user {user_id}: {e}", exc_info=True)
-         # Render with empty list on DB error
-         return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('username')) # Pass username for template
-
-    except Exception as e: # Catch other unexpected errors
-        flash("Unexpected error loading history.", "error")
-        logging.error(f"Unexpected history loading error for user {user_id}: {e}", exc_info=True)
-        # Render with empty list on unexpected error
-        return render_template('history.html', log_entries=[], user_id=user_id, username=g.user.get('username')) # Pass username
-
-    finally: # Ensure cursor and connection are closed
-        if cursor:
+    except (DB_ERROR_TYPE, ConnectionError) as e:
+        flash(f"Database error retrieving history: {e}", "error")
+        logging.error(f"History DB error ({db_type}) for user {user_id}: {e}", exc_info=True)
+    except Exception as e:
+        flash("An unexpected error occurred while loading history.", "error")
+        logging.error(f"Unexpected History Error for user {user_id}: {e}", exc_info=True)
+    finally: # Ensure resources are cleaned up
+        if cursor and not getattr(cursor, 'closed', True):
              try: cursor.close()
-             except Exception: pass
-        if conn:
-             # Ensure close_db_connection is defined
+             except: pass # Ignore close errors
+        if conn and not getattr(conn, 'closed', True):
              close_db_connection(conn)
              logging.debug("DB connection closed in history route finally block.")
 
-    # Render the history template with the formatted log entries
-    return render_template('history.html', log_entries=display_log, user_id=user_id, username=g.user.get('username'))
+    return render_template('history.html', log_entries=display_log, user_id=user_id, username=g.user.get('name')) # Use name
 
 
 @app.route('/qkd')
@@ -1962,107 +1964,78 @@ def qkd_page():
     logging.info(f"--- User {user_id} accessing QKD page ---")
 
     # --- 1. Get Last Simulation Log ---
-    sim_log = None
-    log_key = f'last_qkd_log_{user_id}'
-    try:
-        sim_log = session.get(log_key, None)
-        logging.debug(f"Retrieved sim_log from session key '{log_key}': {type(sim_log)}")
-    except Exception as session_err:
-        logging.error(f"Error retrieving QKD log from session user {user_id}: {session_err}", exc_info=True)
-        flash("Could not load previous simulation data.", "warning")
+    sim_log = session.get(f'last_qkd_log_{user_id}', None) # Use default=None
 
     # --- 2. Fetch QBER History for Chart ---
     labels = []; values = []
     conn = None; cursor = None; limit = 15
-    db_type = "Unknown" # Initialize
+    db_type = "Unknown"
 
-    try: # Outer try for DB operations
+    try:
         conn = get_db_connection()
-        if conn:
-            # --- CORRECTED CURSOR CREATION ---
-            cursor_created = False
-            db_type = "Unknown" # Initialize db_type
+        if not conn:
+            flash("Database unavailable for QBER history.", "error")
+            raise ConnectionError("DB Connection failed for QBER history.")
 
-            if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) # Use RealDict for PG
-                db_type = "PostgreSQL"; cursor_created = True
-                logging.debug("QKD Page: Using psycopg2 RealDictCursor.")
-            elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
-                cursor = conn.cursor(dictionary=True) # Correct for MySQL
-                db_type = "MySQL"; cursor_created = True
-                logging.debug("QKD Page: Using mysql.connector dictionary cursor.")
+        # --- CORRECTED CURSOR CREATION ---
+        cursor_created = False
+        db_type = "Unknown"
 
-            if not cursor_created:
-                 # Fallback or raise error if needed
-                 logging.error(f"QKD Page: Unsupported DB type: {type(conn)}")
-                 raise ConnectionError("Unsupported DB type for QKD page history.")
-            # --- END CORRECTED CURSOR CREATION ---
+        if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            db_type = "PostgreSQL"; cursor_created = True
+            logging.debug("QKD Page: Using psycopg2 RealDictCursor.")
+        elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+            cursor = conn.cursor(dictionary=True)
+            db_type = "MySQL"; cursor_created = True
+            logging.debug("QKD Page: Using mysql.connector dictionary cursor.")
 
-            sql = """
-                SELECT l.log_id, l.timestamp, l.qber_value AS qber
-                FROM qkd_transaction_log l
-                LEFT JOIN accounts s ON l.sender_account_id=s.account_id
-                LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
-                WHERE (s.customer_id=%s OR r.customer_id=%s)
-                  AND l.qber_value IS NOT NULL AND l.qber_value >= 0
-                  AND (l.qkd_status LIKE 'SECURED%%' OR l.qkd_status = 'QKD_EVE_DETECTED')
-                ORDER BY l.timestamp DESC LIMIT %s
-                """
-            logging.debug(f"Executing QBER history SQL with params: ({user_id}, {user_id}, {limit})")
-            cursor.execute(sql, (user_id, user_id, limit))
-            history = cursor.fetchall()
-            logging.debug(f"Fetched {len(history)} rows for QBER history.")
-            history.reverse() # Oldest first for chart
+        if not cursor_created:
+             logging.error(f"QKD Page: Unsupported DB type: {type(conn)}")
+             raise ConnectionError("Unsupported DB type for QKD page history.")
+        # --- END CORRECTED CURSOR CREATION ---
 
-            for entry in history:
-                # Using .get() is safer with dictionary-like cursors
-                log_id = entry.get('log_id'); qber_val = entry.get('qber'); ts = entry.get('timestamp')
-                if log_id and qber_val is not None and ts:
-                    label = f"{ts.strftime('%m/%d %H:%M')} (ID:{log_id})"
-                    try:
-                        qber_pct = float(qber_val) * 100
-                        labels.append(label); values.append(round(qber_pct, 2))
-                    except (ValueError, TypeError) as chart_err:
-                        logging.warning(f"Could not process QBER value '{qber_val}' for chart (Log ID: {log_id}): {chart_err}")
-                else:
-                    logging.warning(f"Skipping history entry due to missing data: {entry}")
+        sql = """
+            SELECT l.log_id, l.timestamp, l.qber_value AS qber
+            FROM qkd_transaction_log l
+            LEFT JOIN accounts s ON l.sender_account_id=s.account_id
+            LEFT JOIN accounts r ON l.receiver_account_id=r.account_id
+            WHERE (s.customer_id=%s OR r.customer_id=%s)
+              AND l.qber_value IS NOT NULL AND l.qber_value >= 0
+              AND (l.qkd_status LIKE 'SECURED%%' OR l.qkd_status = 'QKD_EVE_DETECTED')
+            ORDER BY l.timestamp DESC LIMIT %s
+            """
+        cursor.execute(sql, (user_id, user_id, limit))
+        history = cursor.fetchall()
+        history.reverse()
 
-        else: # DB Connection failed
-            logging.error(f"DB connection failed fetching QBER history for user {user_id}.")
-            labels, values = ['DB Unavailable'], [0]
-            flash("Could not load QBER history due to a database connection issue.", "error")
+        for entry in history:
+             log_id = entry.get('log_id'); qber_val = entry.get('qber'); ts = entry.get('timestamp')
+             if log_id and qber_val is not None and ts:
+                 label = f"{ts.strftime('%m/%d %H:%M')} (ID:{log_id})"
+                 try:
+                     labels.append(label); values.append(round(float(qber_val) * 100, 2))
+                 except (ValueError, TypeError): logging.warning(f"Skipping QBER chart entry {log_id}")
+             else: logging.warning(f"Skipping QBER history entry due to missing data: {entry}")
 
-    except DB_ERROR_TYPE as e: # Catch specific DB errors (PG or MySQL)
-        logging.error(f"QBER history DB error ({db_type}) user {user_id}: {e}", exc_info=True)
-        labels, values = ['DB Error'], [0]
-        flash("Database error loading QBER history.", "error")
-    except ConnectionError as e: # Catch connection errors explicitly
-        logging.error(f"QBER history Connection Error user {user_id}: {e}")
-        labels, values = ['DB Conn Error'], [0]
-        flash("Database connection error loading QBER history.", "error")
-    except Exception as e: # Catch other unexpected errors
-         logging.error(f"Unexpected error fetching/processing QBER history for user {user_id}: {e}", exc_info=True)
-         labels, values = ['Processing Error'], [0]
-         flash("An unexpected error occurred while processing history data.", "error")
-    finally: # Ensure cleanup
-         if cursor and not getattr(cursor, 'closed', True):
-             try: cursor.close()
-             except DB_ERROR_TYPE: pass # Ignore DB specific close errors
-             except Exception as cur_e: logging.error(f"Error closing QKD page cursor: {cur_e}")
-         if conn and not getattr(conn, 'closed', True):
-             close_db_connection(conn)
-         logging.debug("Finished QKD page history fetch attempt.")
+    except (DB_ERROR_TYPE, ConnectionError) as e:
+        logging.error(f"QBER history DB/Conn error ({db_type}) user {user_id}: {e}", exc_info=True)
+        labels, values = ['DB/Conn Error'], [0]; flash("Error loading QBER history.", "error")
+    except Exception as e:
+        logging.error(f"QBER history unexpected error user {user_id}: {e}", exc_info=True)
+        labels, values = ['Processing Error'], [0]; flash("Unexpected QBER history error.", "error")
+    finally:
+        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
+        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
+        logging.debug("Finished QKD page history fetch attempt.")
 
-    # --- 3. Prepare Data for Template ---
-    if not labels: labels, values = ['No History'], [0] # Default chart data
-
-    # Get threshold values from app config
-    qber_threshold_original = app.config.get('QBER_THRESHOLD', 0.15) # Use .get with default
+    # --- 3. Prepare Template Data ---
+    if not labels: labels, values = ['No History'], [0]
+    qber_threshold_original = app.config.get('QBER_THRESHOLD', 0.15)
     qber_threshold_pct = qber_threshold_original * 100
 
     # --- 4. Render Template ---
     try:
-        logging.debug(f"Rendering qkd.html: sim_log={bool(sim_log)}, threshold_pct={qber_threshold_pct}, threshold_orig={qber_threshold_original}, labels_len={len(labels)}")
         return render_template('qkd.html',
                            simulation_log=sim_log,
                            QBER_THRESHOLD_PCT=qber_threshold_pct,
@@ -2072,7 +2045,7 @@ def qkd_page():
     except Exception as render_err:
          logging.error(f"Error rendering qkd.html template: {render_err}", exc_info=True)
          abort(500)
-
+      
 @app.route('/qkd/report/download')
 @login_required
 def download_qkd_report():
