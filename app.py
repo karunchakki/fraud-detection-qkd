@@ -2024,10 +2024,20 @@ def qkd_page():
     except Exception as e:
         logging.error(f"QBER history unexpected error user {user_id}: {e}", exc_info=True)
         labels, values = ['Processing Error'], [0]; flash("Unexpected QBER history error.", "error")
-    finally:
-        if cursor and not getattr(cursor, 'closed', True): try: cursor.close() except: pass
-        if conn and not getattr(conn, 'closed', True): close_db_connection(conn)
-        logging.debug("Finished QKD page history fetch attempt.")
+    finally: # Ensure cleanup
+         # --- CORRECTED INDENTATION for cursor close ---
+         if cursor and not getattr(cursor, 'closed', True):
+             try:
+                 cursor.close()
+             except DB_ERROR_TYPE: # Use global type
+                 pass # Ignore DB specific close errors
+             except Exception as cur_e: # Catch other errors
+                 logging.error(f"Error closing QKD page cursor: {cur_e}")
+         # --- END CORRECTION ---
+
+         if conn and not getattr(conn, 'closed', True):
+             close_db_connection(conn)
+         logging.debug("Finished QKD page history fetch attempt.")
 
     # --- 3. Prepare Template Data ---
     if not labels: labels, values = ['No History'], [0]
