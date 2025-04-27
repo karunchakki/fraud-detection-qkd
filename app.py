@@ -1397,7 +1397,6 @@ The QKD Secure Bank Team"""
     # Show the forgot password form initially
     return render_template('forgot_password.html', form=form)
 
-
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
     """Handles the password reset form submitted via the email link."""
@@ -1407,7 +1406,8 @@ def reset_password(token):
 
     email = None
     try:
-        email = serializer.loads(token, salt='password-reset-salt', max_age=3600) # 1 hour expiry
+        # Validate token and extract email (assuming 10 min expiry, adjust if needed)
+        email = serializer.loads(token, salt='password-reset-salt', max_age=600)
         logging.info(f"Valid password reset token decoded for: {email}")
     except SignatureExpired:
         flash('Password reset link has expired.', 'error'); return redirect(url_for('forgot_password'))
@@ -1416,23 +1416,23 @@ def reset_password(token):
     except Exception as e:
         logging.warning(f"Invalid password reset token error: {e}"); flash('Invalid password reset link.', 'error'); return redirect(url_for('forgot_password'))
 
+    # Verify user exists for the decoded email
     user = get_user_by_email(email)
     if not user:
         flash('User account associated with this link not found.', 'error'); return redirect(url_for('forgot_password'))
 
+    # Handle Form Submission
     form = ResetPasswordForm() if WTFORMS_AVAILABLE else None
-
     if (WTFORMS_AVAILABLE and form.validate_on_submit()) or \
        (not WTFORMS_AVAILABLE and request.method == 'POST'):
 
         new_password = form.password.data if WTFORMS_AVAILABLE else request.form.get('password')
-        confirm_password = form.confirm_password.data if WTFORMS_AVAILABLE else request.form.get('confirm_password')
-
-        # Manual validation if no WTForms
+        # Add manual validation if WTForms is not available
         if not WTFORMS_AVAILABLE:
+             confirm_password = request.form.get('confirm_password')
              errors = []
-             if not new_password or len(new_password) < 8: errors.append("Password min 8 chars")
-             if new_password != confirm_password: errors.append("Passwords don't match")
+             if not new_password or len(new_password) < 8: errors.append("Password must be at least 8 characters long.")
+             if new_password != confirm_password: errors.append("Passwords do not match.")
              if errors:
                  for err in errors: flash(err, 'error')
                  return render_template('reset_password.html', form=form, token=token)
@@ -1441,49 +1441,79 @@ def reset_password(token):
         new_pw_hash = generate_password_hash(new_password)
         conn = None; cursor = None; updated = False; needs_rollback = False
 
-        conn = get_db_connection() # Get connection outside try for finally block access
-        if not conn:
-            flash('Database error. Cannot update password.', 'error')
-            return render_template('reset_password.html', form=form, token=token)
+        try: # Main try block for database transaction
+            conn = get_db_connection()
+            if not conn:
+                flash('Database connection error. Cannot update password.', 'error')
+                # Return early if connection failed
+                return render_template('reset_password.html', form=form, token=token)
 
-        try: # Try block for the database update transaction
-            cursor = conn.cursor()
-            needs_rollback = True
-            sql = "UPDATE customers SET password_hash = %s WHERE email = %s AND customer_id = %s" # Be specific
+            cursor = conn.cursor() # Standard cursor for UPDATE is usually fine
+            needs_rollback = True # Assume rollback needed until commit succeeds
+            sql = "UPDATE customers SET password_hash = %s WHERE email = %s AND customer_id = %s"
             params = (new_pw_hash, email, user['customer_id'])
+
             cursor.execute(sql, params)
-            rows = cursor.rowcount
+            rows = cursor.rowcount # Get affected rows count
             logging.info(f"Password update query for {email}, rows affected: {rows}")
 
             if rows == 1:
-                conn.commit()
+                conn.commit() # Commit the change
                 updated = True
-                needs_rollback = False
+                needs_rollback = False # Don't rollback after successful commit
                 logging.info(f"Password updated successfully for {email}")
             elif rows == 0:
                 logging.error(f"Password update failed (rows=0) for {email}. User mismatch or deleted?")
                 flash('Password update failed (user mismatch or no change).', 'error')
-            else: # Should not happen
-                logging.error(f"Password update affected unexpected rows ({rows}) for {email}.")
-                flash('Password update failed (unexpected error).', 'error')
+            else: # Should not happen due to WHERE clause specificity
+                logging.error(f"Password update affected unexpected rows ({rows}) for {email}. Rolling back.")
+                flash('Password update failed (unexpected database state).', 'error')
+                # Rollback will happen in finally block
 
-        except MySQLError as e:
-            logging.error(f"DB Error resetting password for {email}: {e}", exc_info=True)
+        except DB_ERROR_TYPE as e: # Catch specific DB errors (PG or MySQL)
+            logging.error(f"DB Error during password reset for {email}: {e}", exc_info=True)
             flash('Database error during password update.', 'error')
-        except Exception as e:
-            logging.error(f"Unexpected error resetting password for {email}: {e}", exc_info=True)
+        except Exception as e: # Catch other unexpected errors
+            logging.error(f"Unexpected error during password reset for {email}: {e}", exc_info=True)
             flash('Unexpected error during password update.', 'error')
-        finally: # Finally block associated with the DB transaction try
-             if conn and conn.is_connected(): # Check connection is still valid
-                 if needs_rollback:
-                     try:
-                         conn.rollback()
-                         logging.warning(f"Password reset transaction rolled back for {email}.")
-                     except MySQLError as rb_err:
-                         logging.error(f"Rollback failed during password reset: {rb_err}")
-                 if cursor: cursor.close()
-                 close_db_connection(conn) # Close connection used for this operation
+        finally: # Cleanup for the database transaction try block
+            # --- CORRECTED CONNECTION CHECK and Cleanup ---
+            conn_is_open_for_cleanup = False
+            if conn: # Check if conn object exists
+                if POSTGRES_AVAILABLE and isinstance(conn, psycopg2.extensions.connection):
+                    conn_is_open_for_cleanup = not conn.closed
+                elif MYSQL_AVAILABLE and isinstance(conn, mysql.connector.connection.MySQLConnection):
+                    conn_is_open_for_cleanup = conn.is_connected()
+                else:
+                    logging.warning("Reset Password Finally: Unknown connection type.")
+                    conn_is_open_for_cleanup = True # Assume potentially open
 
+            if conn_is_open_for_cleanup: # Proceed only if connection seems valid
+                if needs_rollback:
+                    try:
+                        conn.rollback()
+                        logging.warning(f"Password reset transaction rolled back for {email}.")
+                    except DB_ERROR_TYPE as rb_err: # Use global DB_ERROR_TYPE
+                        logging.error(f"Rollback attempt failed during password reset: {rb_err}")
+                    except Exception as rb_gen_err:
+                        logging.error(f"Unexpected error during reset rollback: {rb_gen_err}")
+
+                # Close cursor safely
+                if cursor and not getattr(cursor, 'closed', True):
+                    try:
+                        cursor.close()
+                    except DB_ERROR_TYPE: pass
+                    except Exception as cur_close_err:
+                        logging.warning(f"Non-DB error closing reset password cursor: {cur_close_err}")
+
+                # Close the connection using the helper function
+                close_db_connection(conn)
+            else:
+                 logging.debug("Skipping cleanup in reset_password finally: connection invalid/closed.")
+            # --- END CORRECTION ---
+        # --- END of finally block ---
+
+        # Redirect or re-render based on update success
         if updated:
             flash('Password has been reset successfully. Please log in.', 'success')
             return redirect(url_for('login'))
@@ -1491,7 +1521,7 @@ def reset_password(token):
             # Re-render form if update failed after DB interaction
             return render_template('reset_password.html', form=form, token=token)
 
-    # Handle GET request
+    # Handle GET request (show the form)
     return render_template('reset_password.html', form=form, token=token)
 
 import traceback # Ensure traceback is imported if not already
