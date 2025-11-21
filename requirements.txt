@@ -1,23 +1,21 @@
-pytz==2024.1
-psycopg2-binary
-Flask>=3.0.0 # Or your specific version
+Flask>=3.0.0
 Flask-Login>=0.6.0
-mysql-connector-python>=8.0.0 # Or psycopg2-binary if using PostgreSQL
-python-dotenv>=1.0.0
-cryptography>=43.0.0 # Keep flexible
-Flask-Mail>=0.9.1
-itsdangerous>=2.0.0
-Werkzeug>=3.0.0
-numpy>=1.20.0 # Often needed by pandas/sklearn
-pandas>=1.3.0 # If used in fraud detection/data handling
-joblib>=1.0.0 # For loading ML model
-scikit-learn==1.4.1.post1 # For ML model pipeline/prediction
-reportlab>=4.0.0
-waitress>=2.0.0
-gunicorn>=20.0.0 # Good alternative to waitress, often used with Nginx
-# Add Flask-WTF, email_validator ONLY if WTFORMS_AVAILABLE is True
 Flask-WTF>=1.0.0
 WTForms>=3.0.0
 email-validator>=2.0.0
-qiskit>=1.0.0 # Or a specific recent version if needed
-qiskit-aer>=0.13.0 # If using the Aer simulator
+Werkzeug>=3.0.0
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0
+cryptography>=43.0.0
+Flask-Mail>=0.9.1
+itsdangerous>=2.0.0
+pytz==2024.1
+numpy>=1.20.0
+pandas>=1.3.0
+joblib>=1.0.0
+scikit-learn==1.4.1.post1
+reportlab>=4.0.0
+waitress>=2.0.0
+gunicorn>=20.0.0
+qiskit>=1.0.0
+qiskit-aer>=0.13.0
