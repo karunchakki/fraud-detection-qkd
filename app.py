@@ -613,6 +613,11 @@ def transfer_funds():
         
     return redirect(url_for('index'))
 
+# --- Helper Class for Template Compatibility ---
+class DictObj:
+    def __init__(self, d):
+        self.__dict__.update(d)
+
 @app.route('/history')
 @login_required
 def history():
@@ -621,7 +626,9 @@ def history():
     if conn:
         cursor = get_cursor(conn)
         # Simplified query for compatibility
-        sql = """SELECT l.*, s_c.customer_name as sender, r_c.customer_name as receiver 
+        sql = """SELECT l.log_id as id, l.timestamp, s_c.customer_name as sender, r_c.customer_name as receiver,
+                 l.amount, l.qkd_status, l.qber_value as qber, l.encrypted_confirmation as encrypted_details_status,
+                 l.is_flagged, l.fraud_reason
                  FROM qkd_transaction_log l
                  JOIN accounts s_a ON l.sender_account_id = s_a.account_id
                  JOIN customers s_c ON s_a.customer_id = s_c.customer_id
@@ -633,12 +640,21 @@ def history():
         for row in cursor.fetchall():
             d = dict(row)
             d['amount'] = Decimal(str(d['amount']))
+            
+            # Fix missing fields expected by template
+            d['sender'] = d['sender'] 
+            d['receiver'] = d['receiver']
+            d['is_flagged_display'] = "Yes" if d['is_flagged'] else "No"
+            
             # Timezone fix
             if d['timestamp'].tzinfo is None:
                 d['timestamp'] = pytz.utc.localize(d['timestamp'])
             if LOCAL_TIMEZONE:
                 d['timestamp'] = d['timestamp'].astimezone(LOCAL_TIMEZONE)
-            txns.append(d)
+            
+            # Convert dict to object for template (entry.id access)
+            txns.append(DictObj(d))
+            
         close_db_connection(conn)
     return render_template('history.html', log_entries=txns)
 
