@@ -662,8 +662,52 @@ def history():
 @login_required
 def qkd_page():
     sim_log = session.get(f'last_qkd_log_{g.user["id"]}')
-    return render_template('qkd.html', simulation_log=sim_log, 
-                           QBER_THRESHOLD_PCT=app.config['QBER_THRESHOLD']*100)
+    qber_thresh = app.config['QBER_THRESHOLD']
+    
+    # Fetch History for Chart
+    labels = []
+    values = []
+    conn = get_db_connection()
+    if conn:
+        try:
+            cursor = get_cursor(conn)
+            # Fetch recent QBERs for the user to populate the graph
+            sql = """SELECT l.log_id, l.timestamp, l.qber_value 
+                     FROM qkd_transaction_log l
+                     JOIN accounts s ON l.sender_account_id = s.account_id
+                     WHERE s.customer_id = %s 
+                     AND l.qber_value >= 0
+                     ORDER BY l.timestamp DESC LIMIT 15"""
+            cursor.execute(sql, (g.user['id'],))
+            rows = cursor.fetchall()
+            rows.reverse() # Chronological order for chart
+            
+            for r in rows:
+                # Simple date formatting
+                ts = r['timestamp']
+                if hasattr(ts, 'strftime'):
+                    lbl = ts.strftime('%m/%d %H:%M')
+                else:
+                    lbl = str(ts)[:16]
+                
+                val = round(float(r['qber_value']) * 100, 2)
+                labels.append(lbl)
+                values.append(val)
+            cursor.close()
+        except Exception as e:
+            logging.error(f"Chart error: {e}")
+        finally:
+            close_db_connection(conn)
+            
+    if not labels:
+        labels, values = ["No Data"], [0]
+
+    return render_template('qkd.html', 
+                           simulation_log=sim_log, 
+                           QBER_THRESHOLD_PCT=qber_thresh*100,
+                           QBER_THRESHOLD_ORIGINAL=qber_thresh,
+                           qber_history_labels=labels,
+                           qber_history_values=values)
 
 @app.route('/profile')
 @login_required
