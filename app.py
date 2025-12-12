@@ -378,6 +378,63 @@ def health():
     
     return response, (200 if db_status else 503)
 
+@app.route('/quantum-impact')
+def quantum_impact():
+    return render_template("quantum_impact.html")
+
+@app.route('/about')
+def about():
+    return render_template("about.html")
+
+@app.route('/profile')
+@login_required
+def profile():
+    user_id = current_user.id
+    conn = get_db_connection()
+    account = None
+    try:
+        cur = get_cursor(conn)
+        ph = "%s" if db_engine.mode == 'postgres' else "?"
+        cur.execute(f"SELECT * FROM accounts WHERE customer_id = {ph}", (user_id,))
+        row = cur.fetchone()
+        if row:
+            account = dict(row) if isinstance(row, dict) else {'balance': row[2], 'account_number': row[3]} # approx mapping
+    except Exception as e:
+        logger.error(f"Profile Error: {e}")
+    finally:
+        conn.close()
+    return render_template('profile.html', user=current_user, account=account)
+
+@app.route('/fraud')
+@login_required
+def fraud_page():
+    user_id = current_user.id
+    conn = get_db_connection()
+    txns = []
+    try:
+        cur = get_cursor(conn)
+        ph = "%s" if db_engine.mode == 'postgres' else "?"
+        # Basic query to find flagged transactions involving this user
+        query = f"""SELECT l.log_id as id, l.timestamp, l.amount, l.fraud_reason 
+                    FROM qkd_transaction_log l
+                    JOIN accounts s ON l.sender_account_id = s.account_id
+                    WHERE s.customer_id = {ph} AND l.is_flagged = {ph}
+                    ORDER BY l.timestamp DESC LIMIT 20"""
+        
+        true_val = True if db_engine.mode == 'postgres' else 1
+        cur.execute(query, (user_id, true_val))
+        rows = cur.fetchall()
+        for r in rows:
+            d = dict(r) if isinstance(r, dict) else {'id': r[0], 'timestamp': r[1], 'amount': r[2], 'fraud_reason': r[3]}
+            # Format amount
+            d['amount'] = f"{Decimal(str(d['amount'])):.2f}"
+            txns.append(d)
+    except Exception as e:
+        logger.error(f"Fraud Page Error: {e}")
+    finally:
+        conn.close()
+    return render_template("fraud.html", flagged_txns=txns)
+
 # --- CONTEXT ---
 @app.context_processor
 def inject_globals():
