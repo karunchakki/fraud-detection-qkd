@@ -6,12 +6,14 @@ import os
 import datetime
 import logging
 from decimal import Decimal
+from threading import Thread
 
 # --- Flask & Extensions ---
 from flask import (Flask, request, render_template, flash, redirect, url_for,
                    session, g, current_app, Response, abort)
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer
 
 # --- Configuration ---
 from config import Config
@@ -34,12 +36,12 @@ tx_service = TransactionService()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- Auth Setup ---
+# --- Auth & Security Setup ---
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# --- Forms Definitions (Restored) ---
-# We define these here so the UI can render them properly
+# --- Forms Definitions ---
 try:
     from flask_wtf import FlaskForm
     from wtforms import StringField, PasswordField, SubmitField, SelectField, BooleanField, DecimalField, EmailField
@@ -64,12 +66,23 @@ try:
         simulate_eve = BooleanField('Simulate Attack')
         submit = SubmitField('Transfer')
 
+    class ForgotPasswordForm(FlaskForm):
+        email = EmailField('Email Address', validators=[DataRequired(), Email()])
+        submit = SubmitField('Send Reset Link')
+
+    class ResetPasswordForm(FlaskForm):
+        password = PasswordField('New Password', validators=[DataRequired(), Length(min=8)])
+        confirm_password = PasswordField('Confirm New Password', validators=[DataRequired(), EqualTo('password')])
+        submit = SubmitField('Reset Password')
+
 except ImportError:
     WTFORMS_AVAILABLE = False
-    # Dummy classes to prevent crashes if libs missing
+    # Dummy classes
     class LoginForm: pass
     class RegistrationForm: pass
     class TransferForm: pass
+    class ForgotPasswordForm: pass
+    class ResetPasswordForm: pass
 
 # --- Mail Setup ---
 try:
@@ -79,6 +92,12 @@ try:
 except ImportError:
     mail = None
     MAIL_AVAILABLE = False
+
+def send_async_email(app, msg):
+    with app.app_context():
+        if mail:
+            try: mail.send(msg)
+            except Exception as e: logger.error(f"Email Error: {e}")
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -167,7 +186,6 @@ def index():
     finally:
         conn.close()
 
-    # Instantiate form for the modal
     form = TransferForm() if WTFORMS_AVAILABLE else None
     if form:
         form.receiver_account_id.choices = [('', 'Select Recipient')] + \
@@ -182,13 +200,13 @@ def index():
 @login_required
 def transfer_funds():
     user_id = current_user.id
-    
-    # Handle Form Data
+    rx_id = None
+    amount = None
+    simulate_eve = False
+
     if WTFORMS_AVAILABLE:
-        # We need to re-populate choices for validation to pass
         form = TransferForm(request.form)
-        # Hack to bypass choice validation or re-fetch needed choices
-        # For simplicity in this demo, we assume valid input from UI or fallback to request.form
+        # Bypassing validate_on_submit due to dynamic choices, trusting logic or manual checks
         rx_id = form.receiver_account_id.data
         amount = form.amount.data
         simulate_eve = form.simulate_eve.data
@@ -227,14 +245,13 @@ def transfer_funds():
 
     return redirect(url_for('index'))
 
-# --- AUTH ROUTES (FIXED FORM PASSING) ---
+# --- AUTH ROUTES ---
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm() if WTFORMS_AVAILABLE else None
     
-    # Handle POST (Login Attempt)
     if request.method == 'POST':
-        # Use form.validate_on_submit() if using forms, else manual request.form
         if (form and form.validate_on_submit()) or (not form):
             email = form.email.data if form else request.form.get('email')
             password = form.password.data if form else request.form.get('password')
@@ -260,11 +277,10 @@ def login():
                 flash("Invalid credentials.", "error")
             except Exception as e:
                 logger.error(f"Login Error: {e}")
-                flash("Login failed due to system error.", "error")
+                flash("Login failed.", "error")
             finally:
                 conn.close()
     
-    # PASS THE FORM TO THE TEMPLATE
     return render_template('login.html', form=form)
 
 @app.route('/logout')
@@ -310,8 +326,78 @@ def register():
             finally:
                 conn.close()
     
-    # PASS THE FORM TO THE TEMPLATE
     return render_template('register.html', form=form)
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    form = ForgotPasswordForm() if WTFORMS_AVAILABLE else None
+    
+    if request.method == 'POST':
+        if (form and form.validate_on_submit()) or (not form):
+            email = form.email.data if form else request.form.get('email')
+            
+            conn = get_db_connection()
+            user_exists = False
+            try:
+                cur = get_cursor(conn)
+                ph = "%s" if db_engine.mode == 'postgres' else "?"
+                cur.execute(f"SELECT customer_id FROM customers WHERE email = {ph}", (email,))
+                if cur.fetchone():
+                    user_exists = True
+            except Exception as e:
+                logger.error(f"Forgot PW Error: {e}")
+            finally:
+                conn.close()
+
+            if user_exists:
+                token = serializer.dumps(email, salt='password-reset-salt')
+                link = url_for('reset_password', token=token, _external=True)
+                if mail:
+                    msg = Message("Password Reset Request", recipients=[email], 
+                                  body=f"Your reset link: {link}\n\nValid for 10 minutes.")
+                    Thread(target=send_async_email, args=(current_app._get_current_object(), msg)).start()
+                else:
+                    logger.info(f"Mail not configured. Reset Link: {link}")
+            
+            flash("If an account exists, a reset email has been sent.", "info")
+            return redirect(url_for('login'))
+            
+    return render_template('forgot_password.html', form=form)
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    try:
+        email = serializer.loads(token, salt='password-reset-salt', max_age=600)
+    except Exception:
+        flash("The reset link is invalid or has expired.", "error")
+        return redirect(url_for('forgot_password'))
+    
+    form = ResetPasswordForm() if WTFORMS_AVAILABLE else None
+    
+    if request.method == 'POST':
+        if (form and form.validate_on_submit()) or (not form):
+            password = form.password.data if form else request.form.get('password')
+            hashed_pw = generate_password_hash(password)
+            
+            conn = get_db_connection()
+            try:
+                cur = conn.cursor()
+                ph = "%s" if db_engine.mode == 'postgres' else "?"
+                if db_engine.mode == 'postgres':
+                    cur.execute(f"UPDATE customers SET password_hash = {ph} WHERE email = {ph}", (hashed_pw, email))
+                else:
+                    cur.execute("UPDATE customers SET password_hash = ? WHERE email = ?", (hashed_pw, email))
+                conn.commit()
+                flash("Password has been reset successfully. Please log in.", "success")
+                return redirect(url_for('login'))
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"Reset PW DB Error: {e}")
+                flash("Error resetting password.", "error")
+            finally:
+                conn.close()
+                
+    return render_template('reset_password.html', form=form, token=token)
 
 # --- INFO & MISC ROUTES ---
 
