@@ -361,6 +361,23 @@ def risk_page():
         results = run_risk_analysis(analysis_type=atype)
     return render_template('risk_analysis.html', risk_results=results)
 
+@app.route('/health')
+def health():
+    """
+    Health check endpoint for Render/Kubernetes probes.
+    Returns 200 if App + DB are healthy.
+    Returns 503 if DB is down.
+    """
+    db_status = db_engine.check_connection()
+    
+    response = {
+        "status": "healthy" if db_status else "degraded",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "database": "connected" if db_status else "disconnected"
+    }
+    
+    return response, (200 if db_status else 503)
+
 # --- CONTEXT ---
 @app.context_processor
 def inject_globals():
