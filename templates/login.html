@@ -1,65 +1,50 @@
 {% extends "base.html" %}
 
-{% block title %}Login - QSB Portal{% endblock %}
+{% block title %}Sign In - QSB Portal{% endblock %}
 
 {% block content %}
-{# Use flex to center content vertically and horizontally in the main area #}
-<div class="flex flex-col justify-center items-center min-h-[calc(100vh-10rem)]"> {# Adjust min-h based on header/footer height #}
-
-    {# --- HERO SECTION --- #}
-    <div class="text-center mb-10">
-        {# Logo could go here if desired #}
-        {# <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="QSB Logo" class="mx-auto h-12 w-auto mb-4"> #}
-        <h1 class="text-3xl font-bold tracking-tight text-primary-900 dark:text-white mb-2">
-            Welcome Back
-        </h1>
-        <p class="text-base text-neutral-600 dark:text-neutral-400">
-            Sign in to access your Quantum-Secured account.
+<div class="min-h-full flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div class="sm:mx-auto sm:w-full sm:max-w-md">
+        <h2 class="mt-6 text-center text-3xl font-extrabold text-neutral-900 dark:text-white">
+            Sign in to your account
+        </h2>
+        <p class="mt-2 text-center text-sm text-neutral-600 dark:text-neutral-400">
+            Secure Quantum Access
         </p>
     </div>
-    {# --- END HERO SECTION --- #}
 
-    {# --- LOGIN FORM CONTAINER --- #}
-    <div class="w-full max-w-md px-4 sm:px-0">
-        {# Card styling for the form area #}
-        <div class="bg-white dark:bg-primary-900 py-8 px-6 shadow-xl rounded-lg sm:px-10 border border-neutral-200 dark:border-primary-800">
+    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div class="bg-white dark:bg-primary-800 py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-neutral-200 dark:border-primary-700">
+            
+            <form class="space-y-6" action="{{ url_for('login') }}" method="POST">
+                {# CSRF Token is required #}
+                {{ form.hidden_tag() }}
 
-            {# Display Flash Messages Specific to Login Errors (handled by base now, but can add context) #}
-            {# {% include 'partials/_flashes.html' ignore missing %} #}
-
-            <form class="space-y-6" action="{{ url_for('login', next=request.args.get('next')) }}" method="POST" novalidate>
-                {{ form.hidden_tag() }} {# CSRF Token #}
-
-                {# Email Field #}
                 <div>
-                    <label for="{{ form.email.id }}" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Email address</label>
+                    <label for="email" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                        Email address
+                    </label>
                     <div class="mt-1">
-                        {# Added dark mode classes for border, background, text, placeholder, focus rings #}
-                        {{ form.email(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" + (" ring-1 ring-red-500 border-red-500" if form.email.errors else ""), placeholder="you@example.com", required=True, autofocus=True) }}
+                        {{ form.email(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm", placeholder="you@example.com") }}
                     </div>
                     {% if form.email.errors %}
-                        <p class="mt-2 text-xs text-red-600 dark:text-red-400">
-                            {{ form.email.errors[0] }} {# Show only the first error for brevity #}
-                        </p>
+                        <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ form.email.errors[0] }}</p>
                     {% endif %}
                 </div>
 
-                {# Password Field #}
                 <div>
-                    <label for="{{ form.password.id }}" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
+                    <label for="password" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                        Password
+                    </label>
                     <div class="mt-1">
-                        {# Added dark mode classes #}
-                        {{ form.password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" + (" ring-1 ring-red-500 border-red-500" if form.password.errors else ""), placeholder="Password", required=True) }}
+                        {{ form.password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm") }}
                     </div>
-                     {% if form.password.errors %}
-                        <p class="mt-2 text-xs text-red-600 dark:text-red-400">
-                            {{ form.password.errors[0] }}
-                        </p>
+                    {% if form.password.errors %}
+                        <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ form.password.errors[0] }}</p>
                     {% endif %}
                 </div>
 
-                {# Forgot Password Link #}
-                <div class="flex items-center justify-end">
+                <div class="flex items-center justify-between">
                     <div class="text-sm">
                         <a href="{{ url_for('forgot_password') }}" class="font-medium text-accent-600 hover:text-accent-500 dark:text-accent-400 dark:hover:text-accent-300">
                             Forgot your password?
@@ -67,35 +52,33 @@
                     </div>
                 </div>
 
-                {# Submit Button #}
                 <div>
-                    {# Using form.submit() rendering for consistency #}
-                    {{ form.submit(class="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-primary-900 focus:ring-accent-500 transition duration-150 ease-in-out cursor-pointer") }}
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500">
+                        Sign in
+                    </button>
                 </div>
             </form>
 
-             {# Divider #}
-             <div class="mt-6">
+            <div class="mt-6">
                 <div class="relative">
                     <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-neutral-300 dark:border-neutral-700"></div>
+                        <div class="w-full border-t border-neutral-300 dark:border-primary-600"></div>
                     </div>
                     <div class="relative flex justify-center text-sm">
-                        <span class="px-2 bg-white dark:bg-primary-900 text-neutral-500 dark:text-neutral-400">
-                            Don't have an account?
+                        <span class="px-2 bg-white dark:bg-primary-800 text-neutral-500 dark:text-neutral-400">
+                            New to QuantumVault?
                         </span>
                     </div>
                 </div>
 
                 <div class="mt-6">
-                    <a href="{{ url_for('register_customer') }}" class="w-full inline-flex justify-center py-2.5 px-4 border border-neutral-300 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-primary-800 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-primary-900 focus:ring-accent-500 transition duration-150 ease-in-out">
-                        Register Now
+                    <!-- FIXED LINK HERE: was register_customer, now register -->
+                    <a href="{{ url_for('register') }}" class="w-full inline-flex justify-center py-2.5 px-4 border border-neutral-300 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-primary-800 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-primary-900 focus:ring-accent-500 transition duration-150 ease-in-out">
+                        Create an account
                     </a>
                 </div>
             </div>
-
-
-        </div> {# End Form Card #}
-    </div> {# End Form Container #}
+        </div>
+    </div>
 </div>
 {% endblock %}

@@ -1,151 +1,75 @@
 {% extends "base.html" %}
 
-{% block title %}Create Account - QSB Portal{% endblock %}
+{% block title %}Register - QSB Portal{% endblock %}
 
 {% block content %}
-{# --- ADDED: Flex container to center content vertically/horizontally --- #}
-<div class="flex flex-col justify-center items-center min-h-[calc(100vh-10rem)] py-6">
-
-    {# --- Header Section --- #}
-    <div class="text-center mb-8 md:mb-10 max-w-2xl mx-auto"> {# Kept max-w-2xl for header #}
-        <h1 class="text-3xl font-bold tracking-tight text-primary-900 dark:text-white mb-2">
-            Create Your Secure Account
-        </h1>
-        <p class="text-base text-neutral-600 dark:text-neutral-400">
-            Join QSB Portal today. Initial balance: ₹{{ "%.2f"|format(INITIAL_BALANCE | default(1000.00)) }}.
-        </p>
+<div class="min-h-full flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div class="sm:mx-auto sm:w-full sm:max-w-md">
+        <h2 class="mt-6 text-center text-3xl font-extrabold text-neutral-900 dark:text-white">
+            Create a new account
+        </h2>
     </div>
-    {# --- End Header Section --- #}
 
-    {# --- Registration Form Container --- #}
-    {# Use max-w-lg for slightly wider form if needed, centered by outer flex #}
-    <div class="w-full max-w-lg px-4 sm:px-0">
-        <div class="bg-white dark:bg-primary-900 py-8 px-6 shadow-xl rounded-lg sm:px-10 border border-neutral-200 dark:border-primary-800">
+    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div class="bg-white dark:bg-primary-800 py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-neutral-200 dark:border-primary-700">
+            
+            <form class="space-y-6" action="{{ url_for('register') }}" method="POST">
+                {{ form.hidden_tag() }}
 
-            <form class="space-y-6" action="{{ url_for('register_customer') }}" method="post" novalidate>
-                {{ form.hidden_tag() }} {# CSRF Token #}
-
-                {# --- User Information Section --- #}
-
-                {# Full Name #}
                 <div>
-                    <label for="{{ form.customer_name.id }}" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Full Name</label>
+                    <label for="customer_name" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Full Name</label>
                     <div class="mt-1">
-                        {{ form.customer_name(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" + (" ring-1 ring-red-500 border-red-500" if form.customer_name.errors else ""), placeholder="Enter your full name", required=True, autocomplete="name") }}
+                        {{ form.customer_name(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm") }}
                     </div>
-                    {% if form.customer_name.errors %}
-                        <p class="mt-2 text-xs text-red-600 dark:text-red-400">{{ form.customer_name.errors[0] }}</p>
-                    {% endif %}
                 </div>
 
-                {# Email Address #}
                 <div>
-                    <label for="{{ form.email.id }}" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Email address</label>
+                    <label for="email" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Email address</label>
                     <div class="mt-1">
-                         {{ form.email(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" + (" ring-1 ring-red-500 border-red-500" if form.email.errors else ""), placeholder="you@example.com", required=True, autocomplete="email") }}
-                    </div>
-                     {% if form.email.errors %}
-                        <p class="mt-2 text-xs text-red-600 dark:text-red-400">{{ form.email.errors[0] }}</p>
-                    {% endif %}
-                </div>
-
-                {# Phone Number & OTP (Placeholder) #}
-                <div>
-                    <label for="phone_number" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Phone Number</label>
-                    <div class="mt-1 flex rounded-md shadow-sm">
-                         <input type="tel" name="phone_number" id="phone_number" class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-l-md placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 flex-1" placeholder="+91 XXXXXXXXXX" autocomplete="tel">
-                         <button type="button" id="send-otp-button" class="relative -ml-px inline-flex items-center space-x-2 rounded-r-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-700 px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-600 focus:border-accent-500 focus:outline-none focus:ring-1 focus:ring-accent-500 disabled:opacity-50" disabled>
-                             <span>Send OTP</span>
-                         </button>
-                    </div>
-                    <div class="mt-2 hidden" id="otp-input-container">
-                         <label for="otp" class="sr-only">Enter OTP</label>
-                         <input type="text" name="otp" id="otp" class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" placeholder="Enter 6-digit OTP" maxlength="6" disabled>
-                         <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Enter the code sent to your phone.</p>
+                        {{ form.email(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm") }}
                     </div>
                 </div>
 
-                {# Password #}
                 <div>
-                    <label for="{{ form.password.id }}" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
+                    <label for="password" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</label>
                     <div class="mt-1">
-                        {{ form.password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" + (" ring-1 ring-red-500 border-red-500" if form.password.errors else ""), placeholder="Create a password", required=True, autocomplete="new-password") }}
+                        {{ form.password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm") }}
                     </div>
-                     <div class="mt-1 h-2 w-full bg-neutral-200 dark:bg-neutral-700 rounded-full overflow-hidden">
-                         <div id="password-strength-bar" class="h-full bg-red-500 transition-all duration-300 ease-in-out" style="width: 10%;"></div>
-                     </div>
-                     <p id="password-strength-text" class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Password strength: Very Weak</p>
-                     {% if form.password.errors %}
-                        <p class="mt-2 text-xs text-red-600 dark:text-red-400">{{ form.password.errors[0] }}</p>
-                    {% endif %}
                 </div>
 
-                {# Confirm Password #}
                 <div>
-                    <label for="{{ form.confirm_password.id }}" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Confirm Password</label>
+                    <label for="confirm_password" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Confirm Password</label>
                     <div class="mt-1">
-                        {{ form.confirm_password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-neutral-600 rounded-md shadow-sm placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-accent-500 focus:border-accent-500 sm:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100" + (" ring-1 ring-red-500 border-red-500" if form.confirm_password.errors else ""), placeholder="Re-enter password", required=True, autocomplete="new-password") }}
-                    </div>
-                     {% if form.confirm_password.errors %}
-                        <p class="mt-2 text-xs text-red-600 dark:text-red-400">{{ form.confirm_password.errors[0] }}</p>
-                    {% endif %}
-                 </div>
-
-                {# Placeholder for CAPTCHA #}
-                <div class="pt-2">
-                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Security Check</label>
-                    <div class="h-20 bg-neutral-100 dark:bg-neutral-700 rounded-md flex items-center justify-center text-neutral-400 dark:text-neutral-500 text-sm italic">
-                        [CAPTCHA Placeholder]
+                        {{ form.confirm_password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm") }}
                     </div>
                 </div>
 
-
-                {# Submit Button #}
                 <div>
-                    <button type="submit"
-                            class="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-primary-900 focus:ring-accent-500 transition duration-150 ease-in-out">
-                         {{ form.submit.label.text }}
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500">
+                        Register
                     </button>
                 </div>
             </form>
 
-            {# Link to Login #}
-            <div class="mt-8 text-center text-sm">
-                <p class="text-neutral-600 dark:text-neutral-400">
-                    Already have an account?
-                    <a href="{{ url_for('login') }}" class="font-medium text-accent-600 hover:text-accent-500 dark:text-accent-400 dark:hover:text-accent-300">
-                        Sign in here
+            <div class="mt-6">
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-neutral-300 dark:border-primary-600"></div>
+                    </div>
+                    <div class="relative flex justify-center text-sm">
+                        <span class="px-2 bg-white dark:bg-primary-800 text-neutral-500 dark:text-neutral-400">
+                            Already have an account?
+                        </span>
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <a href="{{ url_for('login') }}" class="w-full inline-flex justify-center py-2.5 px-4 border border-neutral-300 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-primary-800 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-primary-900 focus:ring-accent-500 transition duration-150 ease-in-out">
+                        Sign in
                     </a>
-                </p>
+                </div>
             </div>
-
-        </div> {# End Form Card #}
-    </div> {# End Centering Container #}
+        </div>
+    </div>
 </div>
-{% endblock %}
-
-{# Keep the JS block from the previous version for password strength/OTP placeholder #}
-{% block scripts %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const passwordInput = document.getElementById('{{ form.password.id }}');
-    const strengthBar = document.getElementById('password-strength-bar');
-    const strengthText = document.getElementById('password-strength-text');
-
-    if (passwordInput && strengthBar && strengthText) {
-        passwordInput.addEventListener('input', function() {
-            const password = passwordInput.value; let score = 0; let text = 'Very Weak'; let color = 'bg-red-500';
-            if (password.length >= 8) score += 25; if (password.match(/[A-Z]/)) score += 25; if (password.match(/[a-z]/)) score += 10; if (password.match(/[0-9]/)) score += 20; if (password.match(/[^A-Za-z0-9]/)) score += 20; score = Math.min(100, Math.max(0, score));
-            if (score >= 90) { text = 'Very Strong'; color = 'bg-green-500'; } else if (score >= 75) { text = 'Strong'; color = 'bg-lime-500'; } else if (score >= 50) { text = 'Moderate'; color = 'bg-yellow-500'; } else if (score >= 25) { text = 'Weak'; color = 'bg-orange-500'; }
-            strengthBar.style.width = score + '%'; strengthBar.className = 'h-full transition-all duration-300 ease-in-out rounded-full ' + color; strengthText.textContent = 'Password strength: ' + text;
-        });
-    }
-
-    const sendOtpButton = document.getElementById('send-otp-button'); const phoneInput = document.getElementById('phone_number'); const otpContainer = document.getElementById('otp-input-container'); const otpInput = document.getElementById('otp');
-    if (sendOtpButton && phoneInput && otpContainer && otpInput) {
-        phoneInput.addEventListener('input', function() { sendOtpButton.disabled = phoneInput.value.trim() === ''; });
-        sendOtpButton.addEventListener('click', function() { console.log('Simulating OTP send to:', phoneInput.value); otpContainer.classList.remove('hidden'); otpInput.disabled = false; otpInput.focus(); sendOtpButton.textContent = 'Resend OTP'; });
-    }
-});
-</script>
 {% endblock %}
