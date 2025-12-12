@@ -39,7 +39,10 @@ logger = logging.getLogger(__name__)
 # --- Auth & Security Setup ---
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+
+# Initialize Serializer for Password Resets
+# Ensure SECRET_KEY is set in your environment or config
+serializer = URLSafeTimedSerializer(app.config.get('SECRET_KEY', 'dev-secret-key'))
 
 # --- Forms Definitions ---
 try:
@@ -77,7 +80,7 @@ try:
 
 except ImportError:
     WTFORMS_AVAILABLE = False
-    # Dummy classes
+    # Dummy classes to prevent crashes if libs missing
     class LoginForm: pass
     class RegistrationForm: pass
     class TransferForm: pass
@@ -96,8 +99,10 @@ except ImportError:
 def send_async_email(app, msg):
     with app.app_context():
         if mail:
-            try: mail.send(msg)
-            except Exception as e: logger.error(f"Email Error: {e}")
+            try: 
+                mail.send(msg)
+            except Exception as e: 
+                logger.error(f"Email Error: {e}")
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -132,6 +137,7 @@ def load_user(user_id):
         row = cur.fetchone()
         
         if row:
+            # Handle dict (Postgres) vs tuple (SQLite)
             uid = row['customer_id'] if isinstance(row, dict) else row[0]
             name = row['customer_name'] if isinstance(row, dict) else row[1]
             email = row['email'] if isinstance(row, dict) else row[2]
@@ -186,6 +192,7 @@ def index():
     finally:
         conn.close()
 
+    # Form Setup
     form = TransferForm() if WTFORMS_AVAILABLE else None
     if form:
         form.receiver_account_id.choices = [('', 'Select Recipient')] + \
@@ -200,13 +207,13 @@ def index():
 @login_required
 def transfer_funds():
     user_id = current_user.id
+    
     rx_id = None
     amount = None
     simulate_eve = False
 
     if WTFORMS_AVAILABLE:
         form = TransferForm(request.form)
-        # Bypassing validate_on_submit due to dynamic choices, trusting logic or manual checks
         rx_id = form.receiver_account_id.data
         amount = form.amount.data
         simulate_eve = form.simulate_eve.data
@@ -306,7 +313,6 @@ def register():
             try:
                 cur = conn.cursor()
                 ph = "%s" if db_engine.mode == 'postgres' else "?"
-                
                 if db_engine.mode == 'postgres':
                     cur.execute("INSERT INTO customers (customer_name, email, password_hash) VALUES (%s, %s, %s) RETURNING customer_id", (name, email, hashed_pw))
                     cid = cur.fetchone()[0]
@@ -327,6 +333,8 @@ def register():
                 conn.close()
     
     return render_template('register.html', form=form)
+
+# --- PASSWORD RESET ROUTES (FIX FOR CRASH) ---
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
@@ -355,11 +363,12 @@ def forgot_password():
                 if mail:
                     msg = Message("Password Reset Request", recipients=[email], 
                                   body=f"Your reset link: {link}\n\nValid for 10 minutes.")
+                    # Run email sending in background to avoid blocking
                     Thread(target=send_async_email, args=(current_app._get_current_object(), msg)).start()
                 else:
                     logger.info(f"Mail not configured. Reset Link: {link}")
             
-            flash("If an account exists, a reset email has been sent.", "info")
+            flash("If an account exists with that email, a reset link has been sent.", "info")
             return redirect(url_for('login'))
             
     return render_template('forgot_password.html', form=form)
