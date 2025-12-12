@@ -21,6 +21,11 @@ from dotenv import load_dotenv
 from flask import (Flask, request, render_template, flash, redirect, url_for,
                    session, g, current_app, Response, abort, get_flashed_messages)
 from flask_login import LoginManager, login_user, logout_user, current_user, login_required, UserMixin
+# --- MODULAR ENGINE IMPORTS ---
+from modules.quantum_engine import QuantumEngine
+from modules.pqc_engine import PQCEngine
+from modules.db_engine import DBEngine, SecureTransactionManager
+from modules.ml_engine import MLEngine
 
 # --- DATABASE IMPORTS (UPDATED) ---
 import psycopg2.extras
@@ -120,6 +125,13 @@ try:
         LOCAL_TIMEZONE = pytz.utc 
 except ImportError:
     pass
+
+# Initialize Patent-Compliant Engines
+db_engine = DBEngine()
+q_engine = QuantumEngine(n_qubits=app.config.get('QKD_NUM_QUBITS', 600))
+pqc_engine = PQCEngine()
+ml_engine = MLEngine()
+secure_tx_manager = SecureTransactionManager(db_engine)
 
 # --- Initialize Flask App ---
 app = Flask(__name__)
@@ -543,37 +555,44 @@ def transfer_funds():
         flash(f"Input Error: {e}", "error")
         return redirect(url_for('index'))
 
-    # 1. QKD Simulation
-    qkd_res = simulate_bb84(n_qubits=app.config['QKD_NUM_QUBITS'], simulate_eve=sim_eve, qber_threshold=app.config['QBER_THRESHOLD'])
-    session[f'last_qkd_log_{user_id}'] = qkd_res
+    
+    # 1. Quantum & Hybrid Key Generation (Claim 4 & 3)
+    # Uses True Entropy from modules/quantum_engine.py
+    qkd_res = q_engine.start_session(simulate_eve=sim_eve)
+    session[f'last_qkd_log_{user_id}'] = qkd_res 
+
     qber = qkd_res.get('qber', -1)
-    
     qkd_key = None
-    if qber != -1 and not qkd_res['eve_detected']:
-        k_bin = qkd_res['final_key_binary']
-        if k_bin: qkd_key = base64.urlsafe_b64encode(hashlib.sha256(k_bin.encode()).digest())
+    qkd_status = qkd_res['status']
 
-    qkd_status = "SECURED" if qkd_key else ("QKD_EVE_DETECTED" if qkd_res['eve_detected'] else "QKD_FAIL")
+    if qkd_status == 'SECURE':
+        # Hybrid Key Derivation (Claim 2: XOR Logic)
+        raw_qkd_key = qkd_res['raw_key_bytes']
+        pqc_secret = pqc_engine.encapsulate() # Claim 3: Kyber
+        final_key_bytes = pqc_engine.derive_hybrid_key(raw_qkd_key, pqc_secret)
+        qkd_key = base64.urlsafe_b64encode(final_key_bytes) # For Fernet
     
-    # 2. DB Transaction & Fraud Check
-    conn = get_db_connection()
-    if not conn: return redirect(url_for('index'))
-    
-    try:
-        cursor = get_cursor(conn)
-        # Lock Sender
-        cursor.execute("SELECT balance FROM accounts WHERE customer_id = %s", (user_id,))
-        sender_bal = Decimal(cursor.fetchone()['balance'])
-        if sender_bal < amt: raise ValueError("Insufficient funds")
-        
-        # Get Receiver Name
-        cursor.execute("SELECT c.customer_name FROM accounts a JOIN customers c ON a.customer_id = c.customer_id WHERE a.account_id = %s", (rx_id,))
-        rx_name = cursor.fetchone()['customer_name']
+    # 2. ML Fraud Check (Claim 5)
+    fraud_check_data = {
+        'amount': float(amt), 
+        'oldbalanceOrg': 0, # In prod, fetch real balances
+        'newbalanceOrig': 0,
+        'type_TRANSFER': 1
+    }
+    is_fraud, fraud_prob, fraud_reason = ml_engine.predict_fraud(fraud_check_data)
 
-        # Fraud Check
-        fraud_data = detect_fraud({'amount': amt, 'recipient_username': rx_name, 'timestamp': datetime.datetime.now()}, [])
-        is_fraud = fraud_data['is_fraudulent'] or (qkd_status != "SECURED")
-        
+    if qkd_status != 'SECURE':
+        is_fraud = True
+        fraud_reason = f"Quantum Channel Compromised (QBER: {qber:.2%})"
+
+    # 3. Database Transaction with Pessimistic Locking (Claim 6)
+    if not is_fraud:
+        success, msg = secure_tx_manager.execute_locked_transfer(user_id, rx_id, amt)
+        if not success:
+            flash(f"Transfer Failed: {msg}", "error")
+            return redirect(url_for('index'))
+    # --- NEW PATENT-COMPLIANT LOGIC END ---
+
         # Execute Transfer
         cursor.execute("UPDATE accounts SET balance = balance - %s WHERE customer_id = %s", (amt, user_id))
         cursor.execute("UPDATE accounts SET balance = balance + %s WHERE account_id = %s", (amt, rx_id))
