@@ -169,7 +169,22 @@
                         {% else %}
                          <div class="flex-grow">
                              <p class="text-sm font-medium text-neutral-700 dark:text-neutral-200">Guest</p>
-                             <a href="{{ url_for('login') }}" class="text-xs font-medium text-accent-600 dark:text-accent-400 hover:text-accent-800 dark:hover:text-accent-300">Login / Register</a>
+                             <!-- Login Link -->
+<a href="{{ url_for('login') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'login' else normal_class }}">
+    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+    </svg>
+    Sign In
+</a>
+
+<!-- Register Link -->
+<a href="{{ url_for('register') }}" class="{{ base_class }} {{ active_class if request.endpoint == 'register' else normal_class }}">
+    <svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+    </svg>
+    Register
+</a>
+
                         </div>
                         {% endif %}
                         {# Theme Toggle Button #}
