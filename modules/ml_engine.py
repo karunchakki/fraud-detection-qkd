@@ -4,7 +4,8 @@ import logging
 import os
 
 class MLEngine:
-    def __init__(self, model_path='ml_fraud_model.joblib', features_path='fraud_model_features.joblib'):
+    def __init__(self, model_path='model_artifacts/fraud_model.joblib', 
+                       features_path='model_artifacts/fraud_model_features.joblib'):
         self.model = None
         self.features = []
         self.load_model(model_path, features_path)

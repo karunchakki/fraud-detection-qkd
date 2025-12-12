@@ -6,6 +6,7 @@ import io
 import datetime
 import logging
 from decimal import Decimal, InvalidOperation # Keep Decimal import for amount validation if needed
+from modules.db_engine import DBEngine
 
 # ReportLab Imports
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
