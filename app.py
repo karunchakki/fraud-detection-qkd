@@ -352,6 +352,7 @@ def register():
                 if db_engine.mode == 'postgres':
                     cur.execute("INSERT INTO customers (customer_name, email, password_hash) VALUES (%s, %s, %s) RETURNING customer_id", (name, email, hashed_pw))
                     cid = cur.fetchone()[0]
+                    # Give them some money to start
                     cur.execute("INSERT INTO accounts (customer_id, balance, account_number) VALUES (%s, %s, %s)", (cid, 1000.00, str(int(datetime.datetime.now().timestamp()))))
                 else:
                     cur.execute("INSERT INTO customers (customer_name, email, password_hash) VALUES (?, ?, ?)", (name, email, hashed_pw))
@@ -359,7 +360,20 @@ def register():
                     cur.execute("INSERT INTO accounts (customer_id, balance, account_number) VALUES (?, ?, ?)", (cid, 1000.00, str(int(datetime.datetime.now().timestamp()))))
                 
                 conn.commit()
-                flash("Registration successful. Please log in.", "success")
+
+                # --- NEW: SEND WELCOME EMAIL ---
+                if mail:
+                    try:
+                        msg = Message("Welcome to QuantumVault",
+                                      recipients=[email],
+                                      body=f"Hello {name},\n\nYour account has been successfully created.\n\nYour Account ID: {cid}\nInitial Balance: ₹1,000.00\n\nSecure your financial future with Quantum Key Distribution.\n\nRegards,\nQuantumVault Security Team")
+                        Thread(target=send_async_email, args=(current_app._get_current_object(), msg)).start()
+                        logger.info(f"Welcome email sent to {email}")
+                    except Exception as e:
+                        logger.error(f"Failed to send welcome email: {e}")
+                # -------------------------------
+
+                flash("Registration successful. Welcome email sent. Please log in.", "success")
                 return redirect(url_for('login'))
             except Exception as e:
                 conn.rollback()
