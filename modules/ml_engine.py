@@ -15,32 +15,27 @@ class MLEngine:
             if os.path.exists(model_path):
                 self.model = joblib.load(model_path)
             else:
-                logging.warning(f"ML Model not found at {model_path}. ML Engine will run in SAFE MODE.")
+                logging.warning(f"ML Model not found at {model_path}. Safe Mode.")
 
-            # Load features if file exists
-            loaded_features = []
+            # CRITICAL FIX: Merge loaded features with the specific hardcoded requirements
+            # to ensure the model never crashes due to missing column definitions.
+            required_features = ['amount', 'location_risk', 'time_of_day', 'transaction_type']
+            
             if os.path.exists(features_path):
                 loaded_features = joblib.load(features_path)
-                logging.info(f"Loaded Features from file: {loaded_features}")
-            
-            # CRITICAL FIX: Ensure the hardcoded essential features are present
-            # If the model was retrained with different columns, we must respect that,
-            # but if we are getting "missing columns" errors, we force the fallback list.
-            
-            required_fallback = ['amount', 'location_risk', 'time_of_day', 'transaction_type']
-            
-            if not loaded_features:
-                self.features = required_fallback
-                logging.warning("Feature file missing/empty. Using hardcoded fallback.")
+                # Combine loaded features with required ones, removing duplicates
+                feature_set = set(loaded_features)
+                for req in required_features:
+                    feature_set.add(req)
+                self.features = list(feature_set)
             else:
-                # If the file exists but doesn't have our critical columns, we might need to trust it,
-                # BUT if your error logs persist, it means the model *needs* these columns.
-                # We will use the loaded features as the source of truth.
-                self.features = loaded_features
+                # Fallback if file missing
+                self.features = required_features
+            
+            logging.info(f"Final ML Features: {self.features}")
 
         except Exception as e:
             logging.error(f"Failed to load ML artifacts: {e}")
-            # Absolute fallback to prevent crash
             self.features = ['amount', 'location_risk', 'time_of_day', 'transaction_type']
 
     def predict_fraud(self, transaction_data):
@@ -48,56 +43,51 @@ class MLEngine:
         Smart-Maps transaction data to the exact format the AI model expects.
         """
         if not self.model:
-            return False, 0.0, "Model Unavailable (Safe Mode)"
+            return False, 0.0, "Model Unavailable"
 
         try:
             # 1. Initialize input dictionary with 0.0 for ALL required features
             # This guarantees no "missing column" error can ever occur.
             input_dict = {feature: 0.0 for feature in self.features}
             
-            # 2. Extract and Map Data (Smart Mapping)
-            amount = float(transaction_data.get('amount', 0.0))
-            sender_bal = float(transaction_data.get('sender_balance', 1000.0))
-            receiver_bal = float(transaction_data.get('receiver_balance', 0.0))
-            current_hour = float(datetime.datetime.now().hour)
-
+            # 2. Populate Known Data
             # Map 'amount'
-            if 'amount' in input_dict:
-                input_dict['amount'] = amount
+            input_dict['amount'] = float(transaction_data.get('amount', 0.0))
             
-            # Map 'time_of_day' or 'step'
-            if 'time_of_day' in input_dict:
-                input_dict['time_of_day'] = current_hour
-            elif 'step' in input_dict:
-                input_dict['step'] = 1 # PaySim default step
+            # Map 'time_of_day' (Current Hour)
+            input_dict['time_of_day'] = float(datetime.datetime.now().hour)
+            
+            # Map 'transaction_type' (Default to 1.0 = Transfer)
+            input_dict['transaction_type'] = 1.0 
+            
+            # Map 'location_risk' (Default to 0.0 = Low)
+            input_dict['location_risk'] = 0.0
 
-            # Map 'transaction_type'
-            if 'transaction_type' in input_dict:
-                input_dict['transaction_type'] = 1.0 # Transfer
-            elif 'type_TRANSFER' in input_dict:
-                input_dict['type_TRANSFER'] = 1.0
-
-            # Map 'location_risk'
-            if 'location_risk' in input_dict:
-                input_dict['location_risk'] = 0.0 # Low risk default
-
-            # Map Legacy PaySim Columns (if model uses them)
+            # 3. Populate Legacy PaySim Data (if features list contains them)
+            sender_bal = float(transaction_data.get('sender_balance', 1000.0))
+            
             if 'oldbalanceOrg' in input_dict:
                 input_dict['oldbalanceOrg'] = sender_bal
             if 'newbalanceOrig' in input_dict:
-                input_dict['newbalanceOrig'] = sender_bal - amount
+                # Logic: New balance = Old - Amount
+                input_dict['newbalanceOrig'] = sender_bal - input_dict['amount']
             if 'oldbalanceDest' in input_dict:
-                input_dict['oldbalanceDest'] = receiver_bal
+                input_dict['oldbalanceDest'] = float(transaction_data.get('receiver_balance', 0.0))
             if 'newbalanceDest' in input_dict:
-                input_dict['newbalanceDest'] = receiver_bal + amount
+                input_dict['newbalanceDest'] = float(transaction_data.get('receiver_balance', 0.0)) + input_dict['amount']
+            if 'step' in input_dict:
+                input_dict['step'] = 1
+            if 'type_TRANSFER' in input_dict:
+                input_dict['type_TRANSFER'] = 1.0
 
-            # 3. Convert to DataFrame
+            # 4. Create DataFrame
             input_df = pd.DataFrame([input_dict])
             
-            # 4. Strict Column Ordering (Crucial)
+            # 5. Strict Column Filtering & Ordering
+            # Ensure the DataFrame has ONLY the columns expected by the model
             input_df = input_df[self.features]
             
-            # 5. Predict
+            # 6. Predict
             # predict_proba returns [[prob_safe, prob_fraud]]
             prob_fraud = self.model.predict_proba(input_df)[0][1]
             
