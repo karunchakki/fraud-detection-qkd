@@ -10,31 +10,28 @@ class DBEngine:
         self.db_url = db_url or os.environ.get('DATABASE_URL')
         # Simple check to determine mode
         self.mode = 'postgres' if self.db_url and 'postgres' in self.db_url else 'sqlite'
-
-    def get_connection(self):
-        if self.mode == 'postgres':
-            return psycopg2.connect(self.db_url)
-        else:
-            # Fallback for local testing without Postgres
-            import sqlite3
-            conn = sqlite3.connect('database.db')
-            conn.row_factory = sqlite3.Row
-            return conn
-
-    def check_connection(self):
-        """Simple ping to verify DB connectivity."""
-        conn = None
+    
+    def get_balance(self, user_id):
+        """Helper to fetch current balance for ML Context."""
+        conn = self.db.get_connection()
         try:
-            conn = self.get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            return True
+            ph = "%s" if self.db.mode == 'postgres' else "?"
+            
+            # Join accounts table to find balance by customer_id
+            sql = f"SELECT balance FROM accounts WHERE customer_id = {ph}"
+            cursor.execute(sql, (user_id,))
+            res = cursor.fetchone()
+            
+            if res:
+                # Handle dict vs tuple
+                return float(res['balance'] if isinstance(res, dict) else res[0])
+            return 0.0
         except Exception as e:
-            logging.error(f"DB Health Check Failed: {e}")
-            return False
+            logging.error(f"Get Balance Error: {e}")
+            return 0.0
         finally:
-            if conn:
-                conn.close()
+            conn.close()
 
 class SecureTransactionManager:
     def __init__(self, db_engine):

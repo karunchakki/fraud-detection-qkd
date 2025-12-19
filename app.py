@@ -173,35 +173,71 @@ def index():
     conn = get_db_connection()
     user_accounts = []
     receiver_accounts = []
+    last_security_log = None # NEW: Stores the latest QKD/ML data
     
     try:
         cur = get_cursor(conn)
         ph = "%s" if db_engine.mode == 'postgres' else "?"
         
+        # 1. Get User Accounts
         cur.execute(f"SELECT * FROM accounts WHERE customer_id = {ph}", (user_id,))
         rows = cur.fetchall()
         user_accounts = [dict(row) for row in rows]
 
+        # 2. Get Receivers
         cur.execute(f"""SELECT a.account_id, c.customer_name 
                         FROM accounts a JOIN customers c ON a.customer_id = c.customer_id 
                         WHERE a.customer_id != {ph}""", (user_id,))
         r_rows = cur.fetchall()
         receiver_accounts = [dict(row) for row in r_rows]
+
+        # 3. NEW: Fetch Latest Security Telemetry (For Dashboard Cards)
+        # This query gets the most recent transaction to populate the QBER & Risk Cards
+        telemetry_query = f"""
+            SELECT qber_value, ml_score, qkd_status, is_flagged, timestamp
+            FROM qkd_transaction_log 
+            WHERE sender_account_id IN (SELECT account_id FROM accounts WHERE customer_id = {ph})
+            OR receiver_account_id IN (SELECT account_id FROM accounts WHERE customer_id = {ph})
+            ORDER BY timestamp DESC LIMIT 1
+        """
+        cur.execute(telemetry_query, (user_id, user_id))
+        log_row = cur.fetchone()
+        
+        if log_row:
+            # Handle tuple vs dict (DB compatibility)
+            if isinstance(log_row, dict):
+                last_security_log = log_row
+            else:
+                last_security_log = {
+                    'qber_value': log_row[0], 
+                    'ml_score': log_row[1], 
+                    'qkd_status': log_row[2], 
+                    'is_flagged': log_row[3]
+                }
+
     except Exception as e:
         logger.error(f"Index DB Error: {e}")
     finally:
         conn.close()
 
     # Form Setup
-    form = TransferForm() if WTFORMS_AVAILABLE else None
-    if form:
+    form = None
+    if WTFORMS_AVAILABLE:
+        class TransferForm(FlaskForm):
+            receiver_account_id = SelectField('Recipient', validators=[InputRequired()])
+            amount = DecimalField('Amount', validators=[InputRequired(), NumberRange(min=0.01)])
+            simulate_eve = BooleanField('Simulate Attack')
+            submit = SubmitField('Transfer')
+        
+        form = TransferForm()
         form.receiver_account_id.choices = [('', 'Select Recipient')] + \
             [(str(r['account_id']), f"{r['customer_name']} (ID: {r['account_id']})") for r in receiver_accounts]
 
     return render_template('index.html', 
                            user_accounts=user_accounts, 
                            receiver_accounts=receiver_accounts, 
-                           transfer_form=form)
+                           transfer_form=form,
+                           last_log=last_security_log) # PASSED TO TEMPLATE
 
 @app.route('/transfer-funds', methods=['POST'])
 @login_required
