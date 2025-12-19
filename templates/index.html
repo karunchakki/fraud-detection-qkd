@@ -1,276 +1,215 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - QKD Secure Bank{% endblock %}
-
 {% block content %}
-    {# --- Account Dashboard Title --- #}
-    <h2 class="text-3xl font-semibold text-gray-800 dark:text-gray-200 mb-6 text-center md:text-left">Account Dashboard</h2>
-
-    <!-- Status Boxes (Fraud Alert & General Info) -->
-    <div class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Fraud Alert Box -->
-        {% if show_fraud_alert %}
-            <div class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 text-red-800 dark:text-red-300 p-4 rounded-md shadow-sm" role="alert">
-                <p class="font-bold mb-2">Fraud Alert!</p>
-                <p class="text-sm">One or more recent transactions may be suspicious.</p>
-                <a href="{{ url_for('fraud_page') }}" class="text-sm font-semibold underline hover:text-red-900 dark:hover:text-red-200 mt-1 inline-block">Review Fraud Report →</a>
+<!-- SECURITY TELEMETRY DASHBOARD -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    
+    <!-- CARD 1: QKD CHANNEL HEALTH -->
+    <div class="glass-panel rounded-xl p-5 relative overflow-hidden">
+        <div class="flex justify-between items-start">
+            <div>
+                <h3 class="text-slate-400 text-xs uppercase tracking-widest font-semibold">Quantum Channel (QBER)</h3>
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span class="text-3xl font-bold text-white font-mono">
+                        {% if last_log and last_log.qber_value is not none %}
+                            {{ "%.2f"|format(last_log.qber_value * 100) }}%
+                        {% else %}--{% endif %}
+                    </span>
+                    <span class="text-xs text-quantum-400 animate-pulse">● LIVE</span>
+                </div>
             </div>
-        {% else %}
-             <div class="bg-green-50 dark:bg-green-900/20 border-l-4 border-green-500 text-green-800 dark:text-green-300 p-4 rounded-md shadow-sm">
-                 <p class="font-bold mb-2">Fraud Status</p>
-                 <p class="text-sm">No suspicious activity flagged recently.</p>
-             </div>
-        {% endif %}
+            <div class="h-10 w-10 rounded-full bg-quantum-900/50 flex items-center justify-center border border-quantum-500/30">
+                <i class="fa-solid fa-atom text-quantum-400 text-lg"></i>
+            </div>
+        </div>
+        <div class="w-full bg-slate-800 h-1.5 mt-4 rounded-full overflow-hidden">
+            <div class="bg-gradient-to-r from-green-400 to-quantum-500 h-full" 
+                 style="width: {% if last_log and last_log.qber_value %}{{ last_log.qber_value * 600 }}%{% else %}0%{% endif %}"></div>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-2">Kill Switch Threshold: <span class="text-alert-500 font-bold">15.00%</span></p>
+    </div>
 
-        {# Optional: Add another info box here if desired #}
-        <div class="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 text-blue-800 dark:text-blue-300 p-4 rounded-md shadow-sm">
-             <p class="font-bold mb-2">Quick Info</p>
-             <p class="text-sm">QBER Threshold: <span class="font-semibold">{{ QBER_THRESHOLD_DISPLAY }}</span></p> {# Use injected variable #}
+    <!-- CARD 2: PQC ENCRYPTION STATUS -->
+    <div class="glass-panel rounded-xl p-5 relative">
+        <div class="flex justify-between items-start">
+            <div>
+                <h3 class="text-slate-400 text-xs uppercase tracking-widest font-semibold">Crypto-Agility</h3>
+                <div class="mt-2">
+                    <span class="text-xl font-bold text-white">Hybrid Mode</span>
+                </div>
+                <div class="flex items-center gap-2 mt-1">
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-pqc-500/10 text-pqc-500 border border-pqc-500/20">Kyber-768</span>
+                    <span class="px-2 py-0.5 rounded text-[10px] bg-quantum-500/10 text-quantum-400 border border-quantum-500/20">BB84</span>
+                </div>
+            </div>
+            <div class="h-10 w-10 rounded-full bg-pqc-900/50 flex items-center justify-center border border-pqc-500/30">
+                <i class="fa-solid fa-shield-virus text-pqc-500 text-lg"></i>
+            </div>
+        </div>
+        <div class="mt-4 font-mono text-[10px] text-slate-500 truncate">
+            Fingerprint: <span class="text-slate-300">0x7F...Ephemeral</span>
         </div>
     </div>
-    <!-- End Status Boxes -->
 
+    <!-- CARD 3: ML RISK ENGINE -->
+    <div class="glass-panel rounded-xl p-5 relative">
+        <div class="flex justify-between items-start">
+            <div>
+                <h3 class="text-slate-400 text-xs uppercase tracking-widest font-semibold">Fraud Probability</h3>
+                <div class="mt-2 flex items-baseline gap-2">
+                    <span class="text-3xl font-bold {{ 'text-alert-500' if last_log and last_log.ml_score > 0.5 else 'text-emerald-400' }}">
+                        {% if last_log and last_log.ml_score is not none %}
+                            {{ "%.2f"|format(last_log.ml_score) }}
+                        {% else %}0.00{% endif %}
+                    </span>
+                    <span class="text-xs text-slate-500">/ 1.0</span>
+                </div>
+            </div>
+            <div class="h-10 w-10 rounded-full bg-emerald-900/50 flex items-center justify-center border border-emerald-500/30">
+                <i class="fa-solid fa-brain text-emerald-400 text-lg"></i>
+            </div>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-4">
+            <i class="fa-solid fa-check-circle text-emerald-500 mr-1"></i> Behavior Normal
+        </p>
+    </div>
+</div>
 
-    <!-- Display Logged In User's Account Balances -->
-    <div class="mb-8">
-        {# --- Your Accounts Title --- #}
-        <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-3 border-b dark:border-gray-600 pb-2">Your Accounts</h3>
-        {% if user_accounts %}
-        <div class="overflow-x-auto rounded-lg shadow border border-gray-200 dark:border-gray-700">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                <thead class="bg-gray-100 dark:bg-gray-700">
-                    <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account ID</th>
-                        {# === ADD Account Number Header === #}
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account Number</th>
-                        {# === END Header === #}
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Account Holder</th>
-                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Balance</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {% for acc in user_accounts %}
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-300">{{ acc.account_id }}</td>
-                        {# === ADD Account Number Data Cell === #}
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700 dark:text-gray-300">
-                            {% if acc.account_number %} {# Checks if account_number has a non-empty, non-None value #}
-                                {{ acc.account_number }}
-                            {% else %} {# If account_number is None, empty, or False #}
-                                N/A
-                            {% endif %}
-                        </td>
-                        {# === END Data Cell === #}
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-800 dark:text-gray-200">{{ acc.customer_name | e }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-700 dark:text-gray-300">₹{{ "%.2f"|format(acc.balance) }}</td>
-                    </tr>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    
+    <!-- Balance Card -->
+    <div class="glass-panel rounded-xl p-6 relative overflow-hidden group">
+        <div class="absolute -right-6 -top-6 w-32 h-32 bg-quantum-500/20 rounded-full blur-2xl group-hover:bg-quantum-500/30 transition-all"></div>
+        <h3 class="text-slate-400 text-sm font-medium uppercase tracking-wider">Total Balance</h3>
+        <div class="mt-2 flex items-baseline gap-2">
+            <span class="text-4xl font-bold text-white">₹ 
+                {% if user_accounts %}{{ "%.2f"|format(user_accounts[0].balance) }}{% else %}0.00{% endif %}
+            </span>
+            <span class="text-sm text-green-400"><i class="fa-solid fa-arrow-trend-up"></i> Secured</span>
+        </div>
+        <div class="mt-4 text-xs text-slate-500 font-mono">
+            Account: {{ user_accounts[0].account_number if user_accounts else 'N/A' }}
+        </div>
+    </div>
+
+    <!-- Transfer Form -->
+    <div class="lg:col-span-2 glass-panel rounded-xl p-6">
+        <h3 class="text-lg font-semibold mb-4 text-white"><i class="fa-solid fa-money-bill-transfer mr-2"></i>Secure Transfer</h3>
+        
+        <form method="POST" action="{{ url_for('transfer_funds') }}" class="grid grid-cols-1 md:grid-cols-2 gap-6" onsubmit="return showProcessing()">
+            
+            <!-- Recipient -->
+            <div class="space-y-2">
+                <label class="text-sm text-slate-400">Recipient Account</label>
+                <select name="receiver_account_id" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-quantum-500 focus:border-transparent outline-none transition-all">
+                    {% for acc in receiver_accounts %}
+                        <option value="{{ acc.account_id }}">{{ acc.customer_name }} (ID: {{ acc.account_id }})</option>
                     {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <p class="text-center text-gray-500 dark:text-gray-400 my-4">You currently have no accounts.</p>
-        {% endif %}
+                </select>
+            </div>
+
+            <!-- Amount -->
+            <div class="space-y-2">
+                <label class="text-sm text-slate-400">Amount (INR)</label>
+                <div class="relative">
+                    <span class="absolute left-4 top-3 text-slate-500">₹</span>
+                    <input type="number" name="amount" step="0.01" class="w-full bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-4 py-3 text-white focus:ring-2 focus:ring-quantum-500 focus:border-transparent outline-none transition-all" placeholder="0.00">
+                </div>
+            </div>
+
+            <!-- Attack Simulator -->
+            <div class="md:col-span-2 flex items-center p-4 bg-red-900/10 border border-red-900/30 rounded-lg">
+                <input type="checkbox" name="simulate_eve" id="simulate_eve" class="w-5 h-5 text-red-600 rounded focus:ring-red-500 bg-slate-900 border-slate-700">
+                <label for="simulate_eve" class="ml-3 text-sm text-red-200 cursor-pointer select-none">
+                    <span class="font-bold">Simulate Eavesdropper (Eve)</span>
+                    <span class="block text-xs text-red-400/70">Artificially increases QBER > 15% to test Kill Switch.</span>
+                </label>
+            </div>
+
+            <button type="submit" class="md:col-span-2 w-full bg-quantum-600 hover:bg-quantum-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg shadow-quantum-500/20 transition-all transform hover:scale-[1.01]">
+                <i class="fa-solid fa-shield-halved mr-2"></i> Authenticate & Transfer
+            </button>
+        </form>
     </div>
+</div>
 
-    <hr class="my-8 border-t border-gray-200 dark:border-gray-700">
+<!-- Transaction Processing Modal Overlay -->
+<div id="processing-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm hidden">
+    <div class="glass-panel w-full max-w-md p-8 rounded-2xl border-t border-quantum-500/50 shadow-2xl shadow-quantum-500/20 text-center">
+        
+        <!-- Animated Icon -->
+        <div class="mb-6 relative flex justify-center">
+            <div class="absolute inset-0 bg-quantum-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
+            <i class="fa-solid fa-fingerprint text-5xl text-quantum-400 relative z-10"></i>
+        </div>
 
-    <!-- Transaction Input Form -->
-     {# --- Perform Secure Transfer Title --- #}
-    <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-5 border-b dark:border-gray-600 pb-2" id="perform-transfer">Perform Secure Transfer</h3> {# Added id for anchor link #}
-    {% if user_accounts and receiver_accounts %}
+        <h3 class="text-xl font-bold text-white mb-1">Securing Transaction</h3>
+        <p class="text-sm text-slate-400 mb-6">Verify-Then-Commit Protocol Active</p>
 
-        {# --- Render Form using WTForms (if enabled) --- #}
-        {% if are_forms_enabled and transfer_form %}
-            <form action="{{ url_for('transfer_funds') }}" method="post" novalidate class="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
-                {{ transfer_form.hidden_tag() }} {# CSRF Token #}
+        <!-- The Stepper (Claim 7 Visualization) -->
+        <div class="space-y-4 text-left">
+            
+            <!-- Step 1: Locking -->
+            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-1">
+                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
+                    <i class="fa-solid fa-lock text-[10px] text-slate-400"></i>
+                </div>
+                <div class="text-sm text-slate-300">Acquiring Pessimistic Lock...</div>
+            </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <!-- From Account (Display Only) -->
-                     <div>
-                        <label for="display_sender_account" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Your Account:</label>
-                        {# Display Account Number in the "From" field too #}
-                        <input type="text" id="display_sender_account" disabled
-                               value="{{ user_accounts[0].account_number | default(user_accounts[0].account_id) }} (Bal: ₹{{ "%.2f"|format(user_accounts[0].balance) }})"
-                               class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm cursor-not-allowed">
-                        {# Hidden input to actually send the sender ID #}
-                        <input type="hidden" name="sender_account_id" value="{{ user_accounts[0].account_id }}">
-                    </div>
-
-                    <!-- To Account (WTForms Select Field) -->
-                    <div>
-                        <label for="{{ transfer_form.receiver_account_id.id }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ transfer_form.receiver_account_id.label }}</label>
-                        {{ transfer_form.receiver_account_id(class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm") }}
-                        {% if transfer_form.receiver_account_id.errors %}
-                            <div class="mt-1 text-xs text-red-600 dark:text-red-400">
-                                {{ transfer_form.receiver_account_id.errors|join(' ') }}
-                            </div>
-                        {% endif %}
-                    </div>
-
-                     <!-- Amount (WTForms Decimal Field) -->
-                     <div>
-                        <label for="{{ transfer_form.amount.id }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ transfer_form.amount.label }} (INR)</label>
-                        {{ transfer_form.amount(class="mt-1 block w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm", placeholder="e.g., ₹500.00") }}
-                        {% if transfer_form.amount.errors %}
-                            <div class="mt-1 text-xs text-red-600 dark:text-red-400">
-                                {{ transfer_form.amount.errors|join(' ') }}
-                            </div>
-                        {% endif %}
+            <!-- Step 2: QKD/PQC -->
+            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-2">
+                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
+                    <i class="fa-solid fa-wave-square text-[10px] text-slate-400"></i>
+                </div>
+                <div class="text-sm text-slate-300 w-full">
+                    Verifying QBER & Hybrid Key...
+                    <div class="w-full h-1 bg-slate-800 mt-1 rounded overflow-hidden relative">
+                        <div class="absolute inset-0 bg-quantum-500 animate-beam"></div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Simulate Eve Checkbox (WTForms Boolean Field) -->
-                <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    {% if transfer_form.simulate_eve %}
-                        {{ transfer_form.simulate_eve(class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded mr-2") }}
-                        <label for="{{ transfer_form.simulate_eve.id }}" class="text-sm font-medium text-gray-700 dark:text-gray-300 ml-2">
-                            {{ transfer_form.simulate_eve.label }}
-                            <span class="text-xs text-gray-500 dark:text-gray-400">(Increases QKD errors, may abort transfer)</span>
-                        </label>
-                        {% if transfer_form.simulate_eve.errors %}
-                            <div class="mt-1 ml-6 text-xs text-red-600 dark:text-red-400">
-                                {{ transfer_form.simulate_eve.errors|join(' ') }}
-                            </div>
-                        {% endif %}
-                    {% else %}
-                         <input type="checkbox" id="simulate_eve_fallback" name="simulate_eve" value="true"
-                                class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded mr-2">
-                         <label for="simulate_eve_fallback" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                            Simulate Eavesdropper (Eve)?
-                            <span class="text-xs text-gray-500 dark:text-gray-400">(Increases QKD errors, may abort transfer)</span>
-                         </label>
-                    {% endif %}
+            <!-- Step 3: AI Analysis -->
+            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-3">
+                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
+                    <i class="fa-solid fa-brain text-[10px] text-slate-400"></i>
                 </div>
+                <div class="text-sm text-slate-300">Calculating ML Fraud Score...</div>
+            </div>
 
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-                <!-- Submit Button (WTForms Submit Field) -->
-                <div class="pt-5">
-                    {{ transfer_form.submit(class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out") }}
-                </div>
-            </form>
-
-        {# --- Fallback: Render Form Manually if WTForms is not available --- #}
-        {% else %}
-             {# ... (Manual form block remains the same) ... #}
-             <form action="{{ url_for('transfer_funds') }}" method="post" class="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
-                 <p class="text-sm text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 p-3 rounded border border-orange-200 dark:border-orange-600">Note: Advanced form features (like CSRF protection) are disabled as Flask-WTF is not available.</p>
-                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <!-- From Account (Manual) -->
-                    <div>
-                        <label for="sender_account_id_manual" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Your Account:</label>
-                        <select id="sender_account_id_manual" name="sender_account_id" required
-                                class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
-                            <option value="" disabled selected>Select Account</option>
-                            {% for acc in user_accounts %}
-                            {# Display Account Number in Manual Dropdown Too #}
-                            <option value="{{ acc.account_id }}">{{ acc.account_number | default(acc.account_id) }} - (Bal: ₹{{ "%.2f"|format(acc.balance) }})</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <!-- To Account (Manual) -->
-                    <div>
-                        <label for="receiver_account_id_manual" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Account:</label>
-                         <select id="receiver_account_id_manual" name="receiver_account_id" required
-                                class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
-                            <option value="" disabled selected>Select Receiver</option>
-                             {% for acc in receiver_accounts %}
-                             {# Display Account Number in Receiver Dropdown Too #}
-                            <option value="{{ acc.account_id }}">{{ acc.account_number | default(acc.account_id) }} - {{ acc.customer_name }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                     <!-- Amount (Manual) -->
-                     <div>
-                        <label for="amount_manual" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount (INR):</label>
-                        <input type="text" id="amount_manual" name="amount" placeholder="e.g., ₹500.00" required pattern="^\d+(\.\d{1,2})?$" title="Enter a valid amount (e.g., 500 or 500.00)"
-                               class="mt-1 block w-full border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
-                    </div>
-                 </div>
-
-                 <!-- Simulate Eve Checkbox (Manual) -->
-                <div class="flex items-center justify-center mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <input type="checkbox" id="simulate_eve_transfer" name="simulate_eve" value="true"
-                           class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-600 rounded mr-2">
-                    <label for="simulate_eve_transfer" class="text-sm font-medium text-gray-700 dark:text-gray-300 ml-2">
-                        Simulate Eavesdropper (Eve)?
-                        <span class="text-xs text-gray-500 dark:text-gray-400">(Increases QKD errors, may abort transfer)</span>
-                    </label>
-                </div>
-
-                <!-- Submit Button (Manual) -->
-                <div class="pt-5">
-                    <button type="submit" class="w-full inline-flex justify-center py-2.5 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
-                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                           <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                         </svg>
-                        Initiate Secure Transfer
-                    </button>
-                </div>
-            </form>
-        {% endif %} {# End WTForms check #}
-
-    {# --- Messages for when transfers are not possible --- #}
-    {% elif not user_accounts %}
-         <p class="text-center text-gray-500 dark:text-gray-400 my-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-md border dark:border-gray-700">You need an account to send funds.</p>
-    {% else %} {# User has accounts but no receivers available #}
-         <p class="text-center text-gray-500 dark:text-gray-400 my-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-md border dark:border-gray-700">No other customer accounts available to receive funds. Please <a href="{{ url_for('register_customer') }}" class="text-indigo-600 dark:text-indigo-400 hover:underline font-medium">register another customer</a>.</p>
-    {% endif %} {# End transfer possibility check #}
-
-    <hr class="my-10 border-t border-gray-200 dark:border-gray-700">
-
-    <!-- Display Result of the Last Transfer Attempt -->
-    {% if last_transfer_outcome %}
-    <div class="mt-6 mb-8">
-         <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b dark:border-gray-600 pb-2">Last Transfer Attempt Outcome</h3>
-         <div class="p-4 rounded-md shadow-sm text-sm
-            {% if last_transfer_outcome.status == 'Success' %} bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 text-green-800 dark:text-green-200
-            {% else %} bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-200 {% endif %}">
-
-            {# ... (rest of last_transfer_outcome block remains the same) ... #}
-            <p class="mb-2"><span class="font-semibold">Status:</span>
-                <span class="font-bold">{{ last_transfer_outcome.status }}</span>
-            </p>
-            {% if last_transfer_outcome.reason %}
-                 <p class="mb-2"><span class="font-semibold">Reason:</span> {{ last_transfer_outcome.reason }}</p>
-            {% endif %}
-             {% if last_transfer_outcome.amount %}
-                  <p class="mb-2"><span class="font-semibold">Attempted Amount:</span> ₹{{ last_transfer_outcome.amount }}</p>
-             {% endif %}
-            {% if last_transfer_outcome.qber is defined %}
-                 <p class="mb-2"><span class="font-semibold">QBER:</span>
-                    <span class="font-mono">{{ last_transfer_outcome.qber }}</span>
-                    {% if last_transfer_outcome.qkd_status_msg %}
-                        ({{ last_transfer_outcome.qkd_status_msg }})
-                    {% endif %}
-                 </p>
-            {% endif %}
-            {% if last_transfer_outcome.fraud_check %}
-                <p class="mb-2"><span class="font-semibold">Fraud Check:</span>
-                    {% if last_transfer_outcome.fraud_check.is_fraudulent %}
-                        <span class="font-bold text-red-600 dark:text-red-400">Flagged!</span> Reason: {{ last_transfer_outcome.fraud_check.reason }}
-                    {% else %}
-                        <span class="text-green-600 dark:text-green-400">Passed</span>
-                    {% endif %}
-                 </p>
-                 {% if last_transfer_outcome.fraud_check.ml_score is defined and last_transfer_outcome.fraud_check.ml_score >= 0 %}
-                     <p class="text-xs text-current opacity-80"><span class="font-semibold">ML Score:</span> {{ "%.3f" | format(last_transfer_outcome.fraud_check.ml_score) }}</p>
-                 {% endif %}
-            {% endif %}
-            {% if last_transfer_outcome.log_id %}
-                 <p class="mb-1 mt-3 border-t border-current border-opacity-20 pt-2"><span class="font-semibold">Log ID:</span> {{ last_transfer_outcome.log_id }}
-                     <a href="{{ url_for('history') }}" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs ml-2">(View History)</a>
-                     <a href="{{ url_for('show_report_page', log_id=last_transfer_outcome.log_id) }}" class="text-indigo-600 dark:text-indigo-400 hover:underline text-xs ml-2">(View Report Details)</a>
-                 </p>
-            {% endif %}
-            {% if last_transfer_outcome.qkd_log_stored %}
-             <a href="{{ url_for('qkd_page') }}" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium mt-2 inline-block">View Full QKD Log →</a>
-            {% endif %}
-
-         </div> {# End result box #}
-    </div> {# End outcome section #}
-    {% endif %} {# End last_transfer_outcome check #}
-
+{% block scripts %}
+<script>
+    function showProcessing() {
+        const modal = document.getElementById('processing-modal');
+        modal.classList.remove('hidden');
+        
+        // Simulate the steps lighting up
+        setTimeout(() => { 
+            const s1 = document.getElementById('step-1');
+            s1.classList.remove('opacity-50'); 
+            s1.querySelector('i').classList.replace('text-slate-400', 'text-quantum-400');
+        }, 500);
+        
+        setTimeout(() => { 
+            const s2 = document.getElementById('step-2');
+            s2.classList.remove('opacity-50'); 
+            s2.querySelector('i').classList.replace('text-slate-400', 'text-quantum-400');
+        }, 1500);
+        
+        setTimeout(() => { 
+            const s3 = document.getElementById('step-3');
+            s3.classList.remove('opacity-50'); 
+            s3.querySelector('i').classList.replace('text-slate-400', 'text-quantum-400');
+        }, 2500);
+        
+        // Allow form submission after animation starts
+        return true; 
+    }
+</script>
 {% endblock %}
