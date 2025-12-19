@@ -1,83 +1,77 @@
 {% extends "base.html" %}
 
-{% block title %}Sign In - QSB Portal{% endblock %}
+{% block title %}Sign In - QuantumVault{% endblock %}
 
 {% block content %}
-<div class="min-h-full flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-    <div class="sm:mx-auto sm:w-full sm:max-w-md">
-        <h2 class="mt-6 text-center text-3xl font-extrabold text-neutral-900 dark:text-white">
-            Sign in to your account
-        </h2>
-        <p class="mt-2 text-center text-sm text-neutral-600 dark:text-neutral-400">
-            Secure Quantum Access
-        </p>
-    </div>
+<div class="min-h-full flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8 glass-card p-10 rounded-2xl relative overflow-hidden">
+        
+        <!-- Decorative Glow -->
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full h-2 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50"></div>
 
-    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div class="bg-white dark:bg-primary-800 py-8 px-4 shadow sm:rounded-lg sm:px-10 border border-neutral-200 dark:border-primary-700">
-            
-            <form class="space-y-6" action="{{ url_for('login') }}" method="POST">
-                {# CSRF Token is required #}
+        <div class="text-center">
+            <div class="mx-auto h-16 w-16 rounded-2xl bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-lg shadow-primary/30 mb-6">
+                <i class="fa-solid fa-atom text-white text-3xl animate-pulse-glow"></i>
+            </div>
+            <h2 class="text-3xl font-extrabold text-white tracking-tight">Welcome Back</h2>
+            <p class="mt-2 text-sm text-slate-400">
+                Secure Quantum Access Portal
+            </p>
+        </div>
+
+        <form class="mt-8 space-y-6" action="{{ url_for('login') }}" method="POST">
+            {% if form %}
                 {{ form.hidden_tag() }}
-
+            {% endif %}
+            
+            <div class="space-y-5">
                 <div>
-                    <label for="email" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                        Email address
-                    </label>
-                    <div class="mt-1">
-                        {{ form.email(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm", placeholder="you@example.com") }}
+                    <label for="email" class="block text-sm font-medium text-slate-300 mb-1">Email Address</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fa-solid fa-envelope text-slate-500"></i>
+                        </div>
+                        <input id="email" name="email" type="email" autocomplete="email" required 
+                            class="appearance-none block w-full pl-10 pr-3 py-3 border border-slate-700 rounded-xl bg-slate-900/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all sm:text-sm" 
+                            placeholder="you@example.com">
                     </div>
-                    {% if form.email.errors %}
-                        <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ form.email.errors[0] }}</p>
-                    {% endif %}
                 </div>
 
                 <div>
-                    <label for="password" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                        Password
-                    </label>
-                    <div class="mt-1">
-                        {{ form.password(class="appearance-none block w-full px-3 py-2 border border-neutral-300 dark:border-primary-600 rounded-md shadow-sm placeholder-neutral-400 focus:outline-none focus:ring-accent-500 focus:border-accent-500 dark:bg-primary-700 dark:text-white sm:text-sm") }}
-                    </div>
-                    {% if form.password.errors %}
-                        <p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ form.password.errors[0] }}</p>
-                    {% endif %}
-                </div>
-
-                <div class="flex items-center justify-between">
-                    <div class="text-sm">
-                        <a href="{{ url_for('forgot_password') }}" class="font-medium text-accent-600 hover:text-accent-500 dark:text-accent-400 dark:hover:text-accent-300">
-                            Forgot your password?
+                    <div class="flex items-center justify-between mb-1">
+                        <label for="password" class="block text-sm font-medium text-slate-300">Password</label>
+                        <a href="{{ url_for('forgot_password') }}" class="text-xs font-medium text-primary hover:text-primary/80 transition-colors">
+                            Forgot password?
                         </a>
                     </div>
-                </div>
-
-                <div>
-                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-accent-600 hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-500">
-                        Sign in
-                    </button>
-                </div>
-            </form>
-
-            <div class="mt-6">
-                <div class="relative">
-                    <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-neutral-300 dark:border-primary-600"></div>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fa-solid fa-lock text-slate-500"></i>
+                        </div>
+                        <input id="password" name="password" type="password" autocomplete="current-password" required 
+                            class="appearance-none block w-full pl-10 pr-3 py-3 border border-slate-700 rounded-xl bg-slate-900/50 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all sm:text-sm" 
+                            placeholder="••••••••">
                     </div>
-                    <div class="relative flex justify-center text-sm">
-                        <span class="px-2 bg-white dark:bg-primary-800 text-neutral-500 dark:text-neutral-400">
-                            New to QuantumVault?
-                        </span>
-                    </div>
-                </div>
-
-                <div class="mt-6">
-                    <!-- FIXED LINK HERE: was register_customer, now register -->
-                    <a href="{{ url_for('register') }}" class="w-full inline-flex justify-center py-2.5 px-4 border border-neutral-300 dark:border-neutral-700 rounded-md shadow-sm bg-white dark:bg-primary-800 text-sm font-medium text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-primary-900 focus:ring-accent-500 transition duration-150 ease-in-out">
-                        Create an account
-                    </a>
                 </div>
             </div>
+
+            <div>
+                <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-bold rounded-xl text-white bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary focus:ring-offset-slate-900 transition-all duration-200 shadow-lg shadow-primary/20">
+                    <span class="absolute left-0 inset-y-0 flex items-center pl-3">
+                        <i class="fa-solid fa-shield-check text-blue-200 group-hover:text-white transition-colors"></i>
+                    </span>
+                    Sign in to Vault
+                </button>
+            </div>
+        </form>
+
+        <div class="mt-6 text-center">
+            <p class="text-sm text-slate-400">
+                Don't have an account? 
+                <a href="{{ url_for('register') }}" class="font-medium text-primary hover:text-primary/80 transition-colors">
+                    Create one now
+                </a>
+            </p>
         </div>
     </div>
 </div>
