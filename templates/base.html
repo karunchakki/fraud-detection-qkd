@@ -7,32 +7,53 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        quantum: { 500: '#00d4ff', 600: '#0099cc', 900: '#0a192f' },
-                        slate: { 850: '#151e2e', 900: '#0f172a', 950: '#020617' }
-                    }
-                }
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              slate: { 850: '#151e2e', 900: '#0f172a', 950: '#020617' },
+              quantum: { 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2', glow: 'rgba(34, 211, 238, 0.5)' },
+              pqc: { 500: '#8b5cf6', 600: '#7c3aed' },
+              alert: { 500: '#ef4444', 900: '#7f1d1d' },
+              success: { 500: '#10b981' }
+            },
+            fontFamily: {
+              mono: ['"JetBrains Mono"', 'monospace'],
+              sans: ['Inter', 'sans-serif']
+            },
+            animation: {
+              'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'beam': 'beam 2s infinite linear',
+            },
+            keyframes: {
+              beam: {
+                '0%': { transform: 'translateX(-100%)' },
+                '100%': { transform: 'translateX(100%)' }
+              }
             }
+          }
         }
+      }
     </script>
+    <style>
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.7);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+      }
+    </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans antialiased h-full">
 
 <div class="flex h-screen overflow-hidden">
-
-    <!-- SIDEBAR -->
+    <!-- SIDEBAR (Same as before) -->
     <aside class="w-64 bg-slate-950 border-r border-slate-800 flex flex-col hidden md:flex">
-        <!-- Logo -->
         <div class="h-16 flex items-center px-6 border-b border-slate-800">
             <i class="fa-solid fa-atom text-quantum-500 text-2xl mr-3"></i>
             <span class="text-xl font-bold tracking-tight text-white">QuantumVault</span>
         </div>
-
-        <!-- Nav Links -->
         <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
             {% if current_user.is_authenticated %}
                 <a href="{{ url_for('index') }}" class="flex items-center px-4 py-3 text-slate-300 hover:bg-slate-800 hover:text-quantum-500 rounded-lg transition-colors {% if request.endpoint == 'index' %}bg-slate-800 text-quantum-500{% endif %}">
@@ -51,13 +72,8 @@
                 <a href="{{ url_for('login') }}" class="flex items-center px-4 py-3 text-slate-300 hover:bg-slate-800 rounded-lg">
                     <i class="fa-solid fa-right-to-bracket w-5 mr-3"></i> Login
                 </a>
-                <a href="{{ url_for('register') }}" class="flex items-center px-4 py-3 text-slate-300 hover:bg-slate-800 rounded-lg">
-                    <i class="fa-solid fa-user-plus w-5 mr-3"></i> Register
-                </a>
             {% endif %}
         </nav>
-
-        <!-- User Footer -->
         <div class="p-4 border-t border-slate-800 bg-slate-900/50">
             {% if current_user.is_authenticated %}
                 <div class="flex items-center">
@@ -69,54 +85,60 @@
                         <a href="{{ url_for('logout') }}" class="text-xs text-red-400 hover:text-red-300">Logout</a>
                     </div>
                 </div>
-            {% else %}
-                <p class="text-sm text-slate-500">Guest Access</p>
             {% endif %}
         </div>
     </aside>
 
     <!-- MAIN CONTENT -->
     <div class="flex-1 flex flex-col overflow-hidden bg-slate-900">
-        <!-- Mobile Header -->
-        <header class="md:hidden h-16 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-4">
-            <span class="text-lg font-bold text-white">QuantumVault</span>
-            <button onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="text-slate-400 hover:text-white">
-                <i class="fa-solid fa-bars text-xl"></i>
-            </button>
-        </header>
-
-        <!-- Mobile Menu (Dropdown) -->
-        <div id="mobile-menu" class="hidden md:hidden bg-slate-950 border-b border-slate-800 p-4 space-y-2">
-            {% if current_user.is_authenticated %}
-                <a href="{{ url_for('index') }}" class="block px-4 py-2 text-slate-300 hover:bg-slate-800 rounded-lg">Dashboard</a>
-                <a href="{{ url_for('history') }}" class="block px-4 py-2 text-slate-300 hover:bg-slate-800 rounded-lg">History</a>
-                <a href="{{ url_for('qkd_page') }}" class="block px-4 py-2 text-slate-300 hover:bg-slate-800 rounded-lg">QKD Monitor</a>
-                <a href="{{ url_for('logout') }}" class="block px-4 py-2 text-red-400 hover:bg-slate-800 rounded-lg">Logout</a>
-            {% else %}
-                <a href="{{ url_for('login') }}" class="block px-4 py-2 text-slate-300">Login</a>
-                <a href="{{ url_for('register') }}" class="block px-4 py-2 text-slate-300">Register</a>
-            {% endif %}
-        </div>
-
         <!-- Content Area -->
         <main class="flex-1 overflow-y-auto p-4 md:p-8">
-            <!-- Flash Messages -->
+            
+            <!-- FLASH MESSAGES (Updated for Kill Switch UI) -->
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     <div class="mb-6 space-y-2">
                     {% for category, message in messages %}
-                        <div class="p-4 rounded-lg border flex items-center 
-                            {% if 'error' in category %} bg-red-900/20 border-red-500/50 text-red-200 
-                            {% elif 'success' in category %} bg-green-900/20 border-green-500/50 text-green-200 
-                            {% else %} bg-blue-900/20 border-blue-500/50 text-blue-200 {% endif %}">
-                            <i class="fa-solid fa-circle-info mr-3"></i> {{ message }}
-                        </div>
+                        {% if 'SECURITY ALERT' in message %}
+                            <!-- KILL SWITCH UI -->
+                            <div class="mb-6 p-4 rounded-xl bg-alert-900/30 border border-alert-500/50 flex items-start gap-4 relative overflow-hidden">
+                                <div class="absolute inset-0 bg-alert-500/10 animate-pulse"></div>
+                                <div class="h-10 w-10 rounded-full bg-alert-900 flex items-center justify-center border border-alert-500 text-alert-500 shrink-0 z-10">
+                                    <i class="fa-solid fa-hand-palm text-xl"></i>
+                                </div>
+                                <div class="z-10">
+                                    <h4 class="text-alert-500 font-bold text-sm uppercase tracking-wide">System Aborted (Kill Switch Active)</h4>
+                                    <p class="text-slate-300 text-sm mt-1">{{ message }}</p>
+                                    <div class="mt-2 text-xs font-mono text-alert-500 bg-black/30 p-1 rounded inline-block border border-alert-900">
+                                        ERR_CODE: HIGH_QBER_DETECTED
+                                    </div>
+                                </div>
+                            </div>
+                        {% else %}
+                            <div class="p-4 rounded-lg border flex items-center 
+                                {% if 'error' in category %} bg-red-900/20 border-red-500/50 text-red-200 
+                                {% elif 'success' in category %} bg-green-900/20 border-green-500/50 text-green-200 
+                                {% else %} bg-blue-900/20 border-blue-500/50 text-blue-200 {% endif %}">
+                                <i class="fa-solid fa-circle-info mr-3"></i> {{ message }}
+                            </div>
+                        {% endif %}
                     {% endfor %}
                     </div>
                 {% endif %}
             {% endwith %}
 
             {% block content %}{% endblock %}
+
+            <!-- PATENT EVIDENCE FOOTER -->
+            <footer class="mt-12 border-t border-slate-800 pt-6 text-center pb-8">
+                <div class="flex justify-center gap-6 text-[10px] text-slate-500 uppercase tracking-widest font-semibold flex-wrap">
+                    <span><i class="fa-solid fa-server mr-1"></i> PostgreSQL Pessimistic Locking</span>
+                    <span><i class="fa-solid fa-bolt mr-1"></i> IBM/ANU Quantum Entropy</span>
+                    <span><i class="fa-solid fa-lock mr-1"></i> NIST Kyber-768</span>
+                </div>
+                <p class="text-slate-600 text-xs mt-2">Patent Pending (India)</p>
+            </footer>
+
         </main>
     </div>
 </div>
