@@ -1,183 +1,191 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- SECURITY TELEMETRY DASHBOARD -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    
-    <!-- CARD 1: QKD CHANNEL HEALTH -->
-    <div class="glass-panel rounded-xl p-5 relative overflow-hidden">
-        <div class="flex justify-between items-start">
-            <div>
-                <h3 class="text-slate-400 text-xs uppercase tracking-widest font-semibold">Quantum Channel (QBER)</h3>
-                <div class="mt-2 flex items-baseline gap-2">
-                    <span class="text-3xl font-bold text-white font-mono">
+<div class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-3xl font-bold text-white">Security Dashboard</h1>
+            <p class="text-slate-400 mt-1">Real-time Quantum Telemetry & Risk Analysis</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="px-3 py-1 bg-green-500/10 border border-green-500/20 text-green-400 text-xs rounded-full flex items-center">
+                <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2"></span> System Optimal
+            </span>
+        </div>
+    </div>
+
+    <!-- Security Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        
+        <!-- CARD 1: QBER -->
+        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-primary/30 transition-all">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-primary/10 rounded-full blur-xl group-hover:bg-primary/20 transition-all"></div>
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <p class="text-xs font-semibold text-primary uppercase tracking-widest">Quantum Channel</p>
+                    <h3 class="text-3xl font-bold text-white font-mono mt-1">
                         {% if last_log and last_log.qber_value is not none %}
-                            {{ "%.2f"|format(last_log.qber_value * 100) }}%
-                        {% else %}--{% endif %}
-                    </span>
-                    <span class="text-xs text-quantum-400 animate-pulse">● LIVE</span>
+                            {{ "%.2f"|format(last_log.qber_value * 100) }}<span class="text-lg text-slate-500">%</span>
+                        {% else %}
+                            --<span class="text-lg text-slate-500">%</span>
+                        {% endif %}
+                    </h3>
+                </div>
+                <div class="p-2 bg-slate-800/50 rounded-lg border border-white/5">
+                    <i class="fa-solid fa-atom text-primary text-xl"></i>
                 </div>
             </div>
-            <div class="h-10 w-10 rounded-full bg-quantum-900/50 flex items-center justify-center border border-quantum-500/30">
-                <i class="fa-solid fa-atom text-quantum-400 text-lg"></i>
+            <!-- Progress Bar -->
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                <div class="bg-gradient-to-r from-green-400 to-primary h-full transition-all duration-1000" 
+                     style="width: {% if last_log and last_log.qber_value %}{{ last_log.qber_value * 500 }}%{% else %}0%{% endif %}"></div>
             </div>
+            <p class="text-xs text-slate-500 mt-2 flex justify-between">
+                <span>Bit Error Rate</span>
+                <span>Limit: <span class="text-danger">15.0%</span></span>
+            </p>
         </div>
-        <div class="w-full bg-slate-800 h-1.5 mt-4 rounded-full overflow-hidden">
-            <div class="bg-gradient-to-r from-green-400 to-quantum-500 h-full" 
-                 style="width: {% if last_log and last_log.qber_value %}{{ last_log.qber_value * 600 }}%{% else %}0%{% endif %}"></div>
-        </div>
-        <p class="text-[10px] text-slate-500 mt-2">Kill Switch Threshold: <span class="text-alert-500 font-bold">15.00%</span></p>
-    </div>
 
-    <!-- CARD 2: PQC ENCRYPTION STATUS -->
-    <div class="glass-panel rounded-xl p-5 relative">
-        <div class="flex justify-between items-start">
-            <div>
-                <h3 class="text-slate-400 text-xs uppercase tracking-widest font-semibold">Crypto-Agility</h3>
-                <div class="mt-2">
-                    <span class="text-xl font-bold text-white">Hybrid Mode</span>
+        <!-- CARD 2: PQC -->
+        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-secondary/30 transition-all">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-secondary/10 rounded-full blur-xl group-hover:bg-secondary/20 transition-all"></div>
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <p class="text-xs font-semibold text-secondary uppercase tracking-widest">Crypto-Agility</p>
+                    <h3 class="text-2xl font-bold text-white mt-1">Hybrid Mode</h3>
                 </div>
-                <div class="flex items-center gap-2 mt-1">
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-pqc-500/10 text-pqc-500 border border-pqc-500/20">Kyber-768</span>
-                    <span class="px-2 py-0.5 rounded text-[10px] bg-quantum-500/10 text-quantum-400 border border-quantum-500/20">BB84</span>
+                <div class="p-2 bg-slate-800/50 rounded-lg border border-white/5">
+                    <i class="fa-solid fa-shield-halved text-secondary text-xl"></i>
                 </div>
             </div>
-            <div class="h-10 w-10 rounded-full bg-pqc-900/50 flex items-center justify-center border border-pqc-500/30">
-                <i class="fa-solid fa-shield-virus text-pqc-500 text-lg"></i>
+            <div class="flex gap-2">
+                <span class="px-2 py-1 bg-secondary/10 border border-secondary/20 text-secondary text-[10px] font-bold rounded">NIST KYBER-768</span>
+                <span class="px-2 py-1 bg-primary/10 border border-primary/20 text-primary text-[10px] font-bold rounded">BB84 PROTOCOL</span>
             </div>
         </div>
-        <div class="mt-4 font-mono text-[10px] text-slate-500 truncate">
-            Fingerprint: <span class="text-slate-300">0x7F...Ephemeral</span>
-        </div>
-    </div>
 
-    <!-- CARD 3: ML RISK ENGINE -->
-    <div class="glass-panel rounded-xl p-5 relative">
-        <div class="flex justify-between items-start">
-            <div>
-                <h3 class="text-slate-400 text-xs uppercase tracking-widest font-semibold">Fraud Probability</h3>
-                <div class="mt-2 flex items-baseline gap-2">
-                    <span class="text-3xl font-bold {{ 'text-alert-500' if last_log and last_log.ml_score > 0.5 else 'text-emerald-400' }}">
+        <!-- CARD 3: ML SCORE -->
+        <div class="glass-card p-6 rounded-2xl relative overflow-hidden group hover:border-emerald-500/30 transition-all">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition-all"></div>
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <p class="text-xs font-semibold text-emerald-400 uppercase tracking-widest">AI Fraud Score</p>
+                    <h3 class="text-3xl font-bold text-white font-mono mt-1">
                         {% if last_log and last_log.ml_score is not none %}
                             {{ "%.2f"|format(last_log.ml_score) }}
                         {% else %}0.00{% endif %}
-                    </span>
-                    <span class="text-xs text-slate-500">/ 1.0</span>
+                    </h3>
+                </div>
+                <div class="p-2 bg-slate-800/50 rounded-lg border border-white/5">
+                    <i class="fa-solid fa-brain text-emerald-400 text-xl"></i>
                 </div>
             </div>
-            <div class="h-10 w-10 rounded-full bg-emerald-900/50 flex items-center justify-center border border-emerald-500/30">
-                <i class="fa-solid fa-brain text-emerald-400 text-lg"></i>
-            </div>
-        </div>
-        <p class="text-[10px] text-slate-400 mt-4">
-            <i class="fa-solid fa-check-circle text-emerald-500 mr-1"></i> Behavior Normal
-        </p>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-    
-    <!-- Balance Card -->
-    <div class="glass-panel rounded-xl p-6 relative overflow-hidden group">
-        <div class="absolute -right-6 -top-6 w-32 h-32 bg-quantum-500/20 rounded-full blur-2xl group-hover:bg-quantum-500/30 transition-all"></div>
-        <h3 class="text-slate-400 text-sm font-medium uppercase tracking-wider">Total Balance</h3>
-        <div class="mt-2 flex items-baseline gap-2">
-            <span class="text-4xl font-bold text-white">₹ 
-                {% if user_accounts %}{{ "%.2f"|format(user_accounts[0].balance) }}{% else %}0.00{% endif %}
-            </span>
-            <span class="text-sm text-green-400"><i class="fa-solid fa-arrow-trend-up"></i> Secured</span>
-        </div>
-        <div class="mt-4 text-xs text-slate-500 font-mono">
-            Account: {{ user_accounts[0].account_number if user_accounts else 'N/A' }}
+            <p class="text-xs text-slate-400">
+                <i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Behavioral Analysis Normal
+            </p>
         </div>
     </div>
 
-    <!-- Transfer Form -->
-    <div class="lg:col-span-2 glass-panel rounded-xl p-6">
-        <h3 class="text-lg font-semibold mb-4 text-white"><i class="fa-solid fa-money-bill-transfer mr-2"></i>Secure Transfer</h3>
+    <!-- MAIN ACTION AREA -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        <form method="POST" action="{{ url_for('transfer_funds') }}" class="grid grid-cols-1 md:grid-cols-2 gap-6" onsubmit="return showProcessing()">
-            
-            <!-- Recipient -->
-            <div class="space-y-2">
-                <label class="text-sm text-slate-400">Recipient Account</label>
-                <select name="receiver_account_id" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-quantum-500 focus:border-transparent outline-none transition-all">
-                    {% for acc in receiver_accounts %}
-                        <option value="{{ acc.account_id }}">{{ acc.customer_name }} (ID: {{ acc.account_id }})</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- Amount -->
-            <div class="space-y-2">
-                <label class="text-sm text-slate-400">Amount (INR)</label>
-                <div class="relative">
-                    <span class="absolute left-4 top-3 text-slate-500">₹</span>
-                    <input type="number" name="amount" step="0.01" class="w-full bg-slate-800 border border-slate-700 rounded-lg pl-8 pr-4 py-3 text-white focus:ring-2 focus:ring-quantum-500 focus:border-transparent outline-none transition-all" placeholder="0.00">
+        <!-- Balance Section -->
+        <div class="glass-card p-8 rounded-2xl flex flex-col justify-between relative overflow-hidden">
+            <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent"></div>
+            <div>
+                <p class="text-slate-400 text-sm font-medium">Available Balance</p>
+                <div class="text-5xl font-bold text-white mt-2 mb-1 tracking-tight">
+                    ₹ {% if user_accounts %}{{ "%.2f"|format(user_accounts[0].balance) }}{% else %}0.00{% endif %}
                 </div>
+                <p class="text-xs text-slate-500 font-mono">ACC: {{ user_accounts[0].account_number if user_accounts else '****' }}</p>
             </div>
-
-            <!-- Attack Simulator -->
-            <div class="md:col-span-2 flex items-center p-4 bg-red-900/10 border border-red-900/30 rounded-lg">
-                <input type="checkbox" name="simulate_eve" id="simulate_eve" class="w-5 h-5 text-red-600 rounded focus:ring-red-500 bg-slate-900 border-slate-700">
-                <label for="simulate_eve" class="ml-3 text-sm text-red-200 cursor-pointer select-none">
-                    <span class="font-bold">Simulate Eavesdropper (Eve)</span>
-                    <span class="block text-xs text-red-400/70">Artificially increases QBER > 15% to test Kill Switch.</span>
-                </label>
+            <div class="mt-8">
+                <button class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-medium transition-colors border border-white/5">
+                    <i class="fa-solid fa-file-invoice mr-2"></i> View Statement
+                </button>
             </div>
-
-            <button type="submit" class="md:col-span-2 w-full bg-quantum-600 hover:bg-quantum-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg shadow-quantum-500/20 transition-all transform hover:scale-[1.01]">
-                <i class="fa-solid fa-shield-halved mr-2"></i> Authenticate & Transfer
-            </button>
-        </form>
-    </div>
-</div>
-
-<!-- Transaction Processing Modal Overlay -->
-<div id="processing-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-sm hidden">
-    <div class="glass-panel w-full max-w-md p-8 rounded-2xl border-t border-quantum-500/50 shadow-2xl shadow-quantum-500/20 text-center">
-        
-        <!-- Animated Icon -->
-        <div class="mb-6 relative flex justify-center">
-            <div class="absolute inset-0 bg-quantum-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
-            <i class="fa-solid fa-fingerprint text-5xl text-quantum-400 relative z-10"></i>
         </div>
 
-        <h3 class="text-xl font-bold text-white mb-1">Securing Transaction</h3>
-        <p class="text-sm text-slate-400 mb-6">Verify-Then-Commit Protocol Active</p>
-
-        <!-- The Stepper (Claim 7 Visualization) -->
-        <div class="space-y-4 text-left">
+        <!-- Transfer Section -->
+        <div class="lg:col-span-2 glass-card p-8 rounded-2xl">
+            <h3 class="text-xl font-bold text-white mb-6 flex items-center">
+                <span class="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center mr-3 text-sm">
+                    <i class="fa-solid fa-money-bill-transfer"></i>
+                </span>
+                Secure Transfer
+            </h3>
             
-            <!-- Step 1: Locking -->
-            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-1">
-                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
-                    <i class="fa-solid fa-lock text-[10px] text-slate-400"></i>
-                </div>
-                <div class="text-sm text-slate-300">Acquiring Pessimistic Lock...</div>
-            </div>
-
-            <!-- Step 2: QKD/PQC -->
-            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-2">
-                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
-                    <i class="fa-solid fa-wave-square text-[10px] text-slate-400"></i>
-                </div>
-                <div class="text-sm text-slate-300 w-full">
-                    Verifying QBER & Hybrid Key...
-                    <div class="w-full h-1 bg-slate-800 mt-1 rounded overflow-hidden relative">
-                        <div class="absolute inset-0 bg-quantum-500 animate-beam"></div>
+            <form method="POST" action="{{ url_for('transfer_funds') }}" onsubmit="return showProcessing()">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-2">Recipient</label>
+                        <select name="receiver_account_id" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none appearance-none">
+                            {% for acc in receiver_accounts %}
+                                <option value="{{ acc.account_id }}">{{ acc.customer_name }} (ID: {{ acc.account_id }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-2">Amount</label>
+                        <div class="relative">
+                            <span class="absolute left-4 top-3 text-slate-500">₹</span>
+                            <input type="number" name="amount" step="0.01" class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-4 py-3 text-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none" placeholder="0.00">
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Step 3: AI Analysis -->
-            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-3">
-                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
-                    <i class="fa-solid fa-brain text-[10px] text-slate-400"></i>
+                <!-- ATTACK SIMULATOR TOGGLE -->
+                <div class="mb-8 p-4 bg-slate-900/50 rounded-xl border border-white/5 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-danger/10 text-danger flex items-center justify-center">
+                            <i class="fa-solid fa-user-secret text-lg"></i>
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-bold text-white">Simulate Eavesdropper</h4>
+                            <p class="text-xs text-slate-500">Artificially inject errors (QBER > 15%)</p>
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" name="simulate_eve" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-danger"></div>
+                    </label>
                 </div>
+
+                <button type="submit" class="w-full py-4 bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90 text-white font-bold rounded-xl shadow-lg shadow-primary/20 transition-all transform hover:scale-[1.01] flex items-center justify-center gap-2">
+                    <span>Initiate Quantum-Secured Transfer</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL (Same as before but ensures dark mode compat) -->
+<div id="processing-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md hidden">
+    <div class="glass-card w-full max-w-md p-8 rounded-2xl border-t border-primary/50 shadow-2xl shadow-primary/20 text-center">
+        <!-- Content from previous response... -->
+        <div class="mb-6 relative flex justify-center">
+            <div class="absolute inset-0 bg-primary blur-xl opacity-20 rounded-full animate-pulse"></div>
+            <i class="fa-solid fa-fingerprint text-5xl text-primary relative z-10"></i>
+        </div>
+        <h3 class="text-xl font-bold text-white mb-1">Verifying Transaction</h3>
+        <p class="text-sm text-slate-400 mb-6">Executing Verify-Then-Commit Protocol</p>
+        <div class="space-y-4 text-left">
+            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-1">
+                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center"><i class="fa-solid fa-lock text-[10px] text-slate-400"></i></div>
+                <div class="text-sm text-slate-300">Acquiring Pessimistic Lock...</div>
+            </div>
+            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-2">
+                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center"><i class="fa-solid fa-wave-square text-[10px] text-slate-400"></i></div>
+                <div class="text-sm text-slate-300 w-full">Verifying QBER & Hybrid Key...
+                    <div class="w-full h-1 bg-slate-800 mt-1 rounded overflow-hidden relative"><div class="absolute inset-0 bg-primary animate-beam"></div></div>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 opacity-50 transition-all duration-300" id="step-3">
+                <div class="h-6 w-6 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center"><i class="fa-solid fa-brain text-[10px] text-slate-400"></i></div>
                 <div class="text-sm text-slate-300">Calculating ML Fraud Score...</div>
             </div>
-
         </div>
     </div>
 </div>
@@ -188,27 +196,9 @@
     function showProcessing() {
         const modal = document.getElementById('processing-modal');
         modal.classList.remove('hidden');
-        
-        // Simulate the steps lighting up
-        setTimeout(() => { 
-            const s1 = document.getElementById('step-1');
-            s1.classList.remove('opacity-50'); 
-            s1.querySelector('i').classList.replace('text-slate-400', 'text-quantum-400');
-        }, 500);
-        
-        setTimeout(() => { 
-            const s2 = document.getElementById('step-2');
-            s2.classList.remove('opacity-50'); 
-            s2.querySelector('i').classList.replace('text-slate-400', 'text-quantum-400');
-        }, 1500);
-        
-        setTimeout(() => { 
-            const s3 = document.getElementById('step-3');
-            s3.classList.remove('opacity-50'); 
-            s3.querySelector('i').classList.replace('text-slate-400', 'text-quantum-400');
-        }, 2500);
-        
-        // Allow form submission after animation starts
+        setTimeout(() => { document.getElementById('step-1').classList.remove('opacity-50'); document.querySelector('#step-1 i').classList.replace('text-slate-400', 'text-primary'); }, 500);
+        setTimeout(() => { document.getElementById('step-2').classList.remove('opacity-50'); document.querySelector('#step-2 i').classList.replace('text-slate-400', 'text-primary'); }, 1500);
+        setTimeout(() => { document.getElementById('step-3').classList.remove('opacity-50'); document.querySelector('#step-3 i').classList.replace('text-slate-400', 'text-primary'); }, 2500);
         return true; 
     }
 </script>
